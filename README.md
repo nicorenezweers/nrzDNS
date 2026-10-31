@@ -52,7 +52,7 @@ docker build -t nrzdns .
 
 Open <http://localhost:8380>. The first account you create becomes the administrator. After that, registration is closed until you open it in the settings, where you can also create accounts for others.
 
-> **Port 53 must be free.** Only one DNS server can listen on it. Stop Pi-hole, AdGuard Home or dnsmasq first. On many Linux desktops `systemd-resolved` holds `127.0.0.53:53`; that is fine as long as nothing listens on `0.0.0.0:53`. If the port is taken, nrzDNS still starts and shows the error on the dashboard.
+> **Port 53 must be free.** Only one DNS server can listen on it. Stop Technitium, Pi-hole, AdGuard Home or dnsmasq first. On many Linux desktops `systemd-resolved` holds `127.0.0.53:53`; that is fine as long as nothing listens on `0.0.0.0:53`. If the port is taken, the program itself still starts and shows the error on the dashboard; in Docker (and on Umbrel) publishing the port already fails, so the container does not start.
 
 ### Docker Compose
 
@@ -154,7 +154,8 @@ Start-up settings come from environment variables with the prefix `NRZDNS_` (or 
 
 nrzDNS is available in the community app store **nrzStore** (app `nrzDNS`, ID `nrz-dns`). The web interface opens on port `8400`; nrzDNS has its own login, so the Umbrel login in front of it is switched off. DNS is published on port `53` (UDP and TCP) of the Umbrel device, so:
 
-- **Port 53 has to be free** on the device — don't run Pi-hole or AdGuard Home at the same time.
+- **Port 53 has to be free** on the device — don't run Technitium, Pi-hole or AdGuard Home at the same time. Otherwise the installation fails with `app-script install … exit code 1`; stop or uninstall the other DNS server first.
+- **Coming from Technitium:** export each zone in Technitium (*Zones → Export Zone*) and import it in nrzDNS under *Zonen → Importieren*; add your blocklist URLs, blocked and allowed domains again. If your router already points at the Umbrel, nothing changes there — nrzDNS takes over the same address.
 - Point your router's DHCP DNS setting (or single devices) at the **IP address of your Umbrel**.
 
 Data lives in `app-data/nrz-dns/data`. The app ships the program for `amd64` and `arm64` inside the store and runs it in the official `debian:trixie-slim` image as user `1000`, without capabilities.

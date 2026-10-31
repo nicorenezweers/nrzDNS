@@ -52,7 +52,7 @@ docker build -t nrzdns .
 
 <http://localhost:8380> öffnen. Das erste Konto, das du anlegst, wird Administrator. Danach ist die Registrierung geschlossen, bis du sie in den Einstellungen öffnest; dort legst du auch Konten für andere an.
 
-> **Port 53 muss frei sein.** Nur ein DNS-Server kann darauf lauschen. Pi-hole, AdGuard Home oder dnsmasq vorher beenden. Auf vielen Linux-Rechnern belegt `systemd-resolved` die Adresse `127.0.0.53:53`; das stört nicht, solange niemand auf `0.0.0.0:53` lauscht. Ist der Port belegt, startet nrzDNS trotzdem und zeigt den Fehler im Dashboard.
+> **Port 53 muss frei sein.** Nur ein DNS-Server kann darauf lauschen. Technitium, Pi-hole, AdGuard Home oder dnsmasq vorher beenden. Auf vielen Linux-Rechnern belegt `systemd-resolved` die Adresse `127.0.0.53:53`; das stört nicht, solange niemand auf `0.0.0.0:53` lauscht. Ist der Port belegt, startet das Programm selbst trotzdem und zeigt den Fehler im Dashboard; in Docker (und auf Umbrel) scheitert schon das Veröffentlichen des Ports, der Container startet dann nicht.
 
 ### Docker Compose
 
@@ -154,7 +154,8 @@ Einstellungen für den Start kommen aus Umgebungsvariablen mit dem Präfix `NRZD
 
 nrzDNS gibt es im Community-App-Store **nrzStore** (App `nrzDNS`, ID `nrz-dns`). Die Oberfläche öffnet sich auf Port `8400`; nrzDNS hat eine eigene Anmeldung, die Umbrel-Anmeldung davor ist ausgeschaltet. DNS läuft auf Port `53` (UDP und TCP) des Umbrel-Geräts, darum:
 
-- **Port 53 muss auf dem Gerät frei sein** – nicht gleichzeitig Pi-hole oder AdGuard Home betreiben.
+- **Port 53 muss auf dem Gerät frei sein** – nicht gleichzeitig Technitium, Pi-hole oder AdGuard Home betreiben. Sonst schlägt die Installation mit `app-script install … Exit-Code 1` fehl; den anderen DNS-Server zuerst stoppen oder deinstallieren.
+- **Umzug von Technitium:** in Technitium jede Zone exportieren (*Zones → Export Zone*) und in nrzDNS unter *Zonen → Importieren* einlesen; Sperrlisten, eigene Sperren und Ausnahmen neu eintragen. Zeigt der Router schon auf den Umbrel, ändert sich dort nichts – nrzDNS übernimmt dieselbe Adresse.
 - In den DHCP-Einstellungen des Routers (oder an einzelnen Geräten) die **IP-Adresse deines Umbrel** als DNS-Server eintragen.
 
 Die Daten liegen unter `app-data/nrz-dns/data`. Die App bringt das Programm für `amd64` und `arm64` im Store mit und startet es im offiziellen Image `debian:trixie-slim` als Benutzer `1000`, ohne zusätzliche Rechte.
