@@ -152,7 +152,7 @@ Start-up settings come from environment variables with the prefix `NRZDNS_` (or 
 
 ## Umbrel
 
-nrzDNS is available in the community app store **nrzStore** (app `nrzDNS`, ID `nrz-dns`). The web interface opens on port `8380`; nrzDNS has its own login, so the Umbrel login in front of it is switched off. DNS is published on port `53` (UDP and TCP) of the Umbrel device, so:
+nrzDNS is available in the community app store **nrzStore** (app `nrzDNS`, ID `nrz-dns`). The web interface opens on port `8400`; nrzDNS has its own login, so the Umbrel login in front of it is switched off. DNS is published on port `53` (UDP and TCP) of the Umbrel device, so:
 
 - **Port 53 has to be free** on the device — don't run Pi-hole or AdGuard Home at the same time.
 - Point your router's DHCP DNS setting (or single devices) at the **IP address of your Umbrel**.
