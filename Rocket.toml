@@ -1,0 +1,29 @@
+# Standardwerte – jede Einstellung lässt sich mit NRZDNS_<NAME> überschreiben,
+# z. B. NRZDNS_PORT=9000, NRZDNS_DATA_DIR=/data oder NRZDNS_DNS_LISTEN=0.0.0.0:53,[::]:53
+# (siehe src/config.rs).
+[default]
+address = "0.0.0.0"
+port = 8380
+ident = "nrzDNS"
+data_dir = "./data"
+# DNS über UDP und TCP; leere Liste = kein DNS-Server (nur DoH unter /dns-query)
+dns_listen = ["0.0.0.0:53"]
+# Zonendateien kommen als JSON (Import bis 4 MiB)
+limits = { form = "64KiB", json = "4MiB", string = "1MiB" }
+# Echte IP des Aufrufers hinter einem Reverse-Proxy (Bremse gegen Passwort-Raten, Client im
+# Abfrageprotokoll bei DNS über HTTPS). Der Proxy muss diesen Header setzen; `false` = immer
+# die Adresse der Verbindung.
+ip_header = "X-Real-IP"
+# Cookies nur über HTTPS (NRZDNS_COOKIE_SECURE=true), sobald nrzDNS hinter HTTPS läuft.
+cookie_secure = false
+# Sauber beenden bei Ctrl-C und SIGTERM (docker stop): laufende Anfragen abschliessen,
+# Abfrageprotokoll schreiben, dann die Datenbank schliessen.
+shutdown = { ctrlc = true, signals = ["term", "hup"], grace = 5, mercy = 5 }
+
+[debug]
+log_level = "normal"
+# Port 53 braucht Root-Rechte – beim Entwickeln ein hoher Port (dig @127.0.0.1 -p 1053 …)
+dns_listen = ["127.0.0.1:1053"]
+
+[release]
+log_level = "critical"

@@ -1,0 +1,25 @@
+[package]
+name = "nrzdns-engine"
+version = "1.0.0"
+edition = "2021"
+description = "nrzDNS – DNS-Engine: UDP/TCP-Server, Zonen, Weiterleitung (UDP, TCP, DoT, DoH), Cache, Sperrlisten"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[dependencies]
+nrzdns-types = { path = "../types" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+tracing = "0.1"
+thiserror = "2"
+# DNS-Nachrichten lesen und schreiben (nur das Protokoll, ohne eigene Netzwerk-Schicht)
+hickory-proto = { version = "0.26", default-features = false, features = ["std"] }
+# DoH und Sperrlisten; rustls mit ring und eingebauten Wurzelzertifikaten (kein System-CA-Speicher nötig)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "gzip", "http2"] }
+# DNS über TLS
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+webpki-roots = "1"
+# IPv6-Sockets nur für IPv6 (sonst kollidiert [::]:53 mit 0.0.0.0:53)
+socket2 = { version = "0.6", features = ["all"] }
+rand = "0.8"
+# Sperrlisten als .gz-Datei
+flate2 = "1"
