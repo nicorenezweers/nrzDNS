@@ -32,6 +32,14 @@ pub async fn build_with(figment: Figment) -> Result<Rocket<Build>, error::AppErr
     let config: config::Config = figment
         .extract()
         .map_err(|e| error::AppError::Config(e.to_string()))?;
+    if config
+        .mcp_env_token()
+        .is_some_and(|t| t.chars().count() < 16)
+    {
+        return Err(error::AppError::Config(
+            "NRZDNS_MCP_TOKEN: mindestens 16 Zeichen.".into(),
+        ));
+    }
     let pool = db::connect(&config).await?;
     // Ein selbst gesetzter secret_key hat Vorrang; sonst der aus der Datenbank.
     let figment = figment.join((
@@ -50,6 +58,7 @@ pub async fn build_with(figment: Figment) -> Result<Rocket<Build>, error::AppErr
         .manage(auth::throttle::LoginThrottle::default())
         .manage(services::blocking::Updater::default())
         .manage(fairings::LogWriter::default())
+        .manage(services::mcp::McpState::default())
         .attach(fairings::RequestLog)
         // Rockets Shield ohne eigene Header: die setzt alle SecurityHeaders (sonst gewönne
         // Shields X-Frame-Options: SAMEORIGIN über unser DENY)
@@ -62,6 +71,7 @@ pub async fn build_with(figment: Figment) -> Result<Rocket<Build>, error::AppErr
         .mount("/", routes::assets::routes())
         .mount("/", routes::spa::routes())
         .mount("/", routes::doh::routes())
+        .mount("/", routes::mcp::routes())
         .mount("/api/v1", routes::api::routes())
         .register("/", routes::catchers::all()))
 }

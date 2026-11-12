@@ -397,6 +397,70 @@ pub async fn update_one(
     }
 }
 
+/// Eine Liste im Hintergrund laden (nur mit `background = true`; Tests laden nichts).
+pub fn spawn_download(
+    pool: &SqlitePool,
+    config: &Config,
+    engine: &Engine,
+    updater: &Updater,
+    id: i64,
+) {
+    if !config.background {
+        return;
+    }
+    let (pool, config, engine, updater) = (
+        pool.clone(),
+        config.clone(),
+        engine.clone(),
+        updater.clone(),
+    );
+    updater.mark_updating();
+    tokio::spawn(async move {
+        if let Err(e) = update_one(&pool, &config, &engine, &updater, id).await {
+            tracing::warn!(id, "Sperrliste laden: {e}");
+        }
+    });
+}
+
+/// Alle aktiven Listen jetzt im Hintergrund neu laden (nur mit `background = true`).
+pub fn spawn_update_all(pool: &SqlitePool, config: &Config, engine: &Engine, updater: &Updater) {
+    if !config.background {
+        return;
+    }
+    let (pool, config, engine, updater) = (
+        pool.clone(),
+        config.clone(),
+        engine.clone(),
+        updater.clone(),
+    );
+    updater.mark_updating();
+    tokio::spawn(async move {
+        match update_due(&pool, &config, &engine, &updater, true).await {
+            Ok(n) => tracing::info!("{n} Sperrlisten neu geladen"),
+            Err(e) => tracing::warn!("Sperrlisten laden: {e}"),
+        }
+    });
+}
+
+/// Nach einer Änderung an einer Liste die Engine nachziehen: ausgeschaltet → entfernen; neue
+/// Adresse oder noch nie geladen → laden; sonst die gespeicherte Fassung übernehmen.
+pub async fn apply_change(
+    pool: &SqlitePool,
+    config: &Config,
+    engine: &Engine,
+    updater: &Updater,
+    changed: &Changed,
+) {
+    let list = &changed.list;
+    if !list.enabled {
+        engine.remove_block_list(list.id);
+    } else if changed.url_changed || list.last_updated_at.is_none() {
+        spawn_download(pool, config, engine, updater, list.id);
+    } else {
+        push_cached(engine, config, list).await;
+    }
+}
+
 /// Überblick für die Oberfläche.
 pub async fn status(
     pool: &SqlitePool,

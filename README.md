@@ -25,6 +25,7 @@ nrzDNS answers the DNS queries of your whole network from one small program. It 
 | **Query log** | Every query with client, protocol, name, type, response code, source of the answer (zone, cache, upstream, blocked, local, dropped, failed), answer, duration and upstream. **Filters** for client, name, type, response code, source and time, **CSV export**, retention in days. |
 | **Dashboard** | Totals, a **chart** over the last hour, day, week or month, **top clients, top domains, top blocked domains** and query types, server status with uptime, queries per second, cache size and upstream health. |
 | **DNS client** | Ask this server (with zones, blocking and cache) or any other server over UDP, TCP, DoT or DoH, for any record type — with flags, answer, authority and additional sections. |
+| **MCP server** | **Model Context Protocol** at `/mcp` for [nrzDashboard](#mcp-server-nrzdashboard) and other MCP clients: all figures for an overview in one call, statistics, query log, server and blocking state — and, if the admin allows it, turn filters on/off, pause them, switch blocklists, add rules, flush the cache. |
 | **DoH endpoint** | nrzDNS itself answers **DNS over HTTPS** (RFC 8484) at `/dns-query`, `GET` and `POST`, and can be switched off. |
 | **Protection** | **Rate limiting** per client (queries per second), private reverse lookups (`192.168.x.x`, `10.x.x.x`, `fc00::/7`, …) are not sent to the internet, optional empty answers for AAAA in networks without IPv6. |
 | **Multi-user** | The **first account becomes the administrator**. **Admins** change everything; **members** see the dashboard, zones, lists, cache, log and DNS client but only change their own account. Registration can be opened or closed. |
@@ -39,7 +40,7 @@ You need Docker. The image contains the program and the web interface.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.0.0
+  ghcr.io/nicorenezweers/nrz-dns:1.1.0
 ```
 
 The image is multi-arch (`linux/amd64`, `linux/arm64`) and is published for every [release](https://github.com/nicorenezweers/nrzDNS/releases). To build it yourself instead:
@@ -59,7 +60,7 @@ Open <http://localhost:8380>. The first account you create becomes the administr
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.0.0   # or: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.1.0   # or: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -93,10 +94,10 @@ The container runs as user `1000` without any capabilities. Docker (20.10 and la
 Every [release](https://github.com/nicorenezweers/nrzDNS/releases) has the program for Linux (`amd64`, `arm64`) as a single file, with `SHA256SUMS`. It brings its own root certificates for DoT, DoH and blocklist downloads.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.0.0/nrzdns-1.0.0-linux-amd64
-chmod +x nrzdns-1.0.0-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.0.0-linux-amd64   # allow port 53 without root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.0.0-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.1.0/nrzdns-1.1.0-linux-amd64
+chmod +x nrzdns-1.1.0-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.1.0-linux-amd64   # allow port 53 without root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.1.0-linux-amd64
 ```
 
 To try it without touching port 53, let it listen elsewhere, e.g. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, and ask it with `dig @127.0.0.1 -p 5353 example.com`.
@@ -104,7 +105,7 @@ To try it without touching port 53, let it listen elsewhere, e.g. `NRZDNS_DNS_LI
 ### Both architectures
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.0.0 --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.1.0 --push .
 ```
 
 Rust is cross-compiled, not emulated, so the arm64 build is fast on an x86 machine and vice versa. Only the program, gzipped per architecture (for the Umbrel app): `scripts/store-binaries.sh <folder>`.
@@ -138,6 +139,7 @@ Start-up settings come from environment variables with the prefix `NRZDNS_` (or 
 | `NRZDNS_CONFIG` | `Rocket.toml` (`/app/Rocket.toml` in the image) | Path of the configuration file |
 | `NRZDNS_COOKIE_SECURE` | `false` | Set to `true` when the web interface is served via HTTPS |
 | `NRZDNS_IP_HEADER` | `X-Real-IP` | Header in which a reverse proxy passes the client address (login throttling); `false` when nrzDNS is reachable directly |
+| `NRZDNS_MCP_TOKEN` | – | Fixed token for the MCP server (at least 16 characters); otherwise create one under *Settings → MCP* |
 | `NRZDNS_LOG` | `info` | Log filter, e.g. `debug` or `info,nrzdns_engine=debug` |
 
 ### DNS settings (web interface, admins)
@@ -149,6 +151,36 @@ Start-up settings come from environment variables with the prefix `NRZDNS_` (or 
 | Cache | On, 50 000 entries, TTL between 10 s and 1 day, negative answers 300 s, serve-stale up to 1 day, prefetch on |
 | Blocking | On, answer `0.0.0.0` / `::` with TTL 60 s, lists updated every 24 hours |
 | Query log | On, kept for 30 days |
+
+## MCP server (nrzDashboard)
+
+nrzDNS speaks the [Model Context Protocol](https://modelcontextprotocol.io) at `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, stateless, answers as `application/json`). That is how nrzDashboard gets the values for its overview — and any other MCP client works too.
+
+1. *Settings → MCP* (admins): **Create token** and copy it (it is shown only once). Or set `NRZDNS_MCP_TOKEN`.
+2. In the client: URL `http://<host>:8380/mcp`, header `Authorization: Bearer <token>`.
+3. Optional: **Allow changes via MCP** — otherwise the token can only read.
+
+| Tool | What it returns / does |
+|---|---|
+| `get_overview` `{range?}` | Everything for an overview tile in one call: server (version, uptime, queries/s, DNS ports), blocking (`enabled`, `paused`, `active`, blocked domains, lists), totals for the range (`queries`, `blocked`, `blockedPercent`, `cacheHitPercent`, `failed`, `clients`, `avgDurationMs` …), upstreams healthy/total, top 5 clients, domains and blocked domains |
+| `get_statistics` `{range?, includeSeries?}` | The full dashboard: totals, time series, top 10 lists, query types, server state |
+| `get_server_status`, `get_blocking_status` | Running state; blocking with every list |
+| `get_query_log` `{client?, qname?, qtype?, kind?, rcode?, from?, to?, limit?, page?}` | Latest queries, newest first |
+| `check_domain` `{domain}` | Would it be blocked, and why? |
+| `list_zones`, `list_rules` `{list}` | Own zones; own blocked or allowed domains |
+| `set_blocking` `{enabled}` ✎ | Turn the filters on or off (on also ends a pause) |
+| `pause_blocking` `{minutes}` ✎ | Pause filtering, `0` resumes |
+| `set_blocklist` `{id \| name, enabled}` ✎ | Switch a single blocklist |
+| `update_blocklists` ✎ | Reload all active lists now |
+| `add_rule` / `remove_rule` `{list, domain, comment?}` ✎ | Own blocked (`blocked`) or allowed (`allowed`) domains |
+| `flush_cache` `{name?}` ✎ | Flush the cache, all or one name |
+
+✎ = only with *Allow changes via MCP*; without it these tools are not even listed. `range` is `hour`, `day` (default), `week` or `month`. Each result comes as JSON text and as `structuredContent`.
+
+```bash
+curl -s http://localhost:8380/mcp -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_overview","arguments":{"range":"day"}}}'
+```
 
 ## Umbrel
 

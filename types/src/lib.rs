@@ -62,6 +62,14 @@
 //! | `DELETE /cache` | → [`CacheFlushResult`] (alles leeren) | Admin |
 //! | `DELETE /cache/<name>` | → [`CacheFlushResult`] (alle Typen dieses Namens) | Admin |
 //! | `POST /resolve` | [`ResolveInput`] → [`ResolveResult`] (DNS-Client) | angemeldet |
+//! | `GET /settings/mcp` | → [`McpStatus`] | Admin |
+//! | `PUT /settings/mcp` | [`McpSettingsInput`] → [`McpStatus`] | Admin |
+//! | `POST /settings/mcp/token` | → [`McpToken`] (neues Token, nur jetzt im Klartext; das alte gilt nicht mehr) | Admin |
+//! | `DELETE /settings/mcp/token` | → [`McpStatus`] (MCP aus) | Admin |
+//!
+//! **MCP-Server** (Model Context Protocol, Streamable HTTP, JSON-RPC 2.0) unter `POST /mcp`, mit
+//! `Authorization: Bearer <Token>` – für nrzDashboard und andere MCP-Clients: Übersicht,
+//! Statistiken, Abfrageprotokoll und (wenn erlaubt) Sperren ein-/ausschalten, pausieren usw.
 //!
 //! Ausserhalb von `/api/v1`: **DNS über HTTPS** (RFC 8484) unter `GET /dns-query?dns=<base64url>`
 //! und `POST /dns-query` (`application/dns-message`), ohne Anmeldung, abschaltbar mit
@@ -1172,6 +1180,41 @@ pub struct ServerStatus {
     pub blocking_enabled: bool,
     pub blocking_paused_until: Option<i64>,
     pub upstreams: Vec<UpstreamHealth>,
+}
+
+// ------------------------------------------------------------------ MCP
+
+/// Zustand des MCP-Servers (`/mcp`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct McpStatus {
+    /// Es gibt ein Token (aus der Datenbank oder `NRZDNS_MCP_TOKEN`), `/mcp` nimmt Anfragen an.
+    pub enabled: bool,
+    /// Das Token kommt aus der Umgebung (`NRZDNS_MCP_TOKEN`) und lässt sich hier nicht ändern.
+    pub from_env: bool,
+    /// Anfang und Ende des Tokens (`nrzdns_mcp_Ab3d…x9Z1`).
+    pub token_hint: Option<String>,
+    pub created_at: Option<i64>,
+    /// Werkzeuge, die etwas ändern (Sperren, Pause, Listen, Regeln, Cache), sind erlaubt.
+    pub allow_changes: bool,
+    /// Zuletzt benutzt (Unix-Sekunden, seit dem Start des Servers).
+    pub last_used_at: Option<i64>,
+    /// `/mcp`
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct McpSettingsInput {
+    pub allow_changes: bool,
+}
+
+/// Neues Token – nur in dieser Antwort im Klartext.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToken {
+    pub token: String,
+    pub status: McpStatus,
 }
 
 // ------------------------------------------------------------------ DNS: Cache

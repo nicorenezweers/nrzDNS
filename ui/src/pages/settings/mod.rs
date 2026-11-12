@@ -1,10 +1,12 @@
 //! Einstellungen: der DNS-Server (Allgemein, Weiterleitung, Cache, Sperren, Protokoll), das
-//! eigene Konto, – für Administratoren – die Benutzer und die Info zu dieser Instanz.
+//! eigene Konto, – für Administratoren – die Benutzer und der MCP-Server – und die Info zu
+//! dieser Instanz.
 
 mod account;
 mod admin;
 mod dns;
 mod info;
+mod mcp;
 
 use crate::Route;
 use crate::components::common::*;
@@ -63,6 +65,12 @@ const ITEMS: &[Item] = &[
         admin_only: true,
     },
     Item {
+        key: "mcp",
+        label: "MCP",
+        group: "Instanz",
+        admin_only: true,
+    },
+    Item {
         key: "info",
         label: "Info",
         group: "Instanz",
@@ -97,6 +105,7 @@ fn icon(key: &str) -> Element {
         "logging" => rsx! { icons::ScrollText {} },
         "account" => rsx! { icons::User {} },
         "users" => rsx! { icons::Users {} },
+        "mcp" => rsx! { icons::Plug {} },
         _ => rsx! { icons::Info {} },
     }
 }
@@ -138,6 +147,7 @@ pub fn Settings(section: String) -> Element {
                     "general" | "forwarding" | "cache" | "blocking" | "logging" => rsx! { dns::Dns { section: section.clone() } },
                     "account" => rsx! { account::Account {} },
                     "users" if admin => rsx! { admin::Users {} },
+                    "mcp" if admin => rsx! { mcp::Mcp {} },
                     "info" => rsx! { info::Info {} },
                     _ => rsx! { Callout { text: tr("Diesen Bereich gibt es nicht oder er ist nur für Administratoren.") } },
                 }

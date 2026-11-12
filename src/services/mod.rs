@@ -3,6 +3,7 @@
 pub mod blocking;
 pub mod dashboard;
 pub mod domains;
+pub mod mcp;
 pub mod querylog;
 pub mod settings;
 pub mod sync;

@@ -25,6 +25,7 @@ nrzDNS beantwortet die DNS-Anfragen deines ganzen Netzes mit einem kleinen Progr
 | **Abfrageprotokoll** | Jede Anfrage mit Client, Protokoll, Name, Typ, Antwortcode, Herkunft der Antwort (Zone, Cache, Weiterleitung, gesperrt, lokal, verworfen, fehlgeschlagen), Antwort, Dauer und vorgelagertem Server. **Filter** nach Client, Name, Typ, Antwortcode, Herkunft und Zeitraum, **CSV-Export**, Aufbewahrung in Tagen. |
 | **Dashboard** | Kennzahlen, **Verlaufsdiagramm** über die letzte Stunde, den letzten Tag, die letzte Woche oder den letzten Monat, **Top-Clients, Top-Domains, meistgesperrte Domains** und Anfragetypen, Serverzustand mit Laufzeit, Anfragen je Sekunde, Cache-Grösse und Zustand der Weiterleitungen. |
 | **DNS-Client** | Diesen Server (mit Zonen, Sperren und Cache) oder jeden anderen über UDP, TCP, DoT oder DoH fragen, für jeden Eintragstyp – mit Flags, Antwort-, Authority- und Additional-Abschnitt. |
+| **MCP-Server** | **Model Context Protocol** unter `/mcp` für [nrzDashboard](#mcp-server-nrzdashboard) und andere MCP-Clients: alle Kennzahlen für eine Übersicht in einem Aufruf, Statistiken, Abfrageprotokoll, Zustand von Server und Sperren – und, wenn der Admin es erlaubt, Filter ein-/ausschalten, pausieren, Sperrlisten umschalten, Regeln anlegen, Cache leeren. |
 | **DoH-Endpunkt** | nrzDNS beantwortet selbst **DNS über HTTPS** (RFC 8484) unter `/dns-query`, `GET` und `POST`, abschaltbar. |
 | **Schutz** | **Rate-Limit** je Client (Anfragen pro Sekunde), Rückwärtsanfragen für private Netze (`192.168.x.x`, `10.x.x.x`, `fc00::/7` …) gehen nicht ins Internet, auf Wunsch leere AAAA-Antworten für Netze ohne IPv6. |
 | **Mehrere Konten** | Das **erste Konto wird Administrator**. **Admins** ändern alles; **Mitglieder** sehen Dashboard, Zonen, Listen, Cache, Protokoll und DNS-Client, ändern aber nur ihr eigenes Konto. Die Registrierung lässt sich öffnen und schliessen. |
@@ -39,7 +40,7 @@ Du brauchst Docker. Das Image enthält Programm und Oberfläche.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.0.0
+  ghcr.io/nicorenezweers/nrz-dns:1.1.0
 ```
 
 Das Image ist für mehrere Architekturen gebaut (`linux/amd64`, `linux/arm64`) und erscheint mit jedem [Release](https://github.com/nicorenezweers/nrzDNS/releases). Selbst bauen:
@@ -59,7 +60,7 @@ docker build -t nrzdns .
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.0.0   # oder: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.1.0   # oder: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -93,10 +94,10 @@ Der Container läuft als Benutzer `1000` ohne zusätzliche Rechte. Docker (ab 20
 Jedes [Release](https://github.com/nicorenezweers/nrzDNS/releases) enthält das Programm für Linux (`amd64`, `arm64`) als einzelne Datei, dazu `SHA256SUMS`. Die Wurzelzertifikate für DoT, DoH und das Laden der Sperrlisten bringt es selbst mit.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.0.0/nrzdns-1.0.0-linux-amd64
-chmod +x nrzdns-1.0.0-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.0.0-linux-amd64   # Port 53 ohne root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.0.0-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.1.0/nrzdns-1.1.0-linux-amd64
+chmod +x nrzdns-1.1.0-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.1.0-linux-amd64   # Port 53 ohne root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.1.0-linux-amd64
 ```
 
 Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen lassen, z. B. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, und mit `dig @127.0.0.1 -p 5353 example.com` fragen.
@@ -104,7 +105,7 @@ Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen la
 ### Beide Architekturen
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.0.0 --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.1.0 --push .
 ```
 
 Rust wird quer-kompiliert, nicht emuliert – der arm64-Build ist auf einem x86-Rechner also schnell und umgekehrt. Nur das Programm, gzip-komprimiert je Architektur (für die Umbrel-App): `scripts/store-binaries.sh <ordner>`.
@@ -138,6 +139,7 @@ Einstellungen für den Start kommen aus Umgebungsvariablen mit dem Präfix `NRZD
 | `NRZDNS_CONFIG` | `Rocket.toml` (`/app/Rocket.toml` im Image) | Pfad der Konfigurationsdatei |
 | `NRZDNS_COOKIE_SECURE` | `false` | Auf `true` setzen, wenn die Oberfläche über HTTPS läuft |
 | `NRZDNS_IP_HEADER` | `X-Real-IP` | Kopfzeile, in der ein Reverse Proxy die Adresse des Aufrufers mitschickt (Bremse gegen Passwort-Raten); `false`, wenn nrzDNS direkt erreichbar ist |
+| `NRZDNS_MCP_TOKEN` | – | Festes Token für den MCP-Server (mindestens 16 Zeichen); sonst unter *Einstellungen → MCP* erzeugen |
 | `NRZDNS_LOG` | `info` | Log-Filter, z. B. `debug` oder `info,nrzdns_engine=debug` |
 
 ### DNS-Einstellungen (Oberfläche, Admins)
@@ -149,6 +151,36 @@ Einstellungen für den Start kommen aus Umgebungsvariablen mit dem Präfix `NRZD
 | Cache | An, 50 000 Einträge, TTL zwischen 10 s und 1 Tag, negative Antworten 300 s, abgelaufene Einträge bis 1 Tag ausliefern, Prefetch an |
 | Sperren | An, Antwort `0.0.0.0` / `::` mit TTL 60 s, Listen alle 24 Stunden neu laden |
 | Abfrageprotokoll | An, 30 Tage aufbewahren |
+
+## MCP-Server (nrzDashboard)
+
+nrzDNS spricht das [Model Context Protocol](https://modelcontextprotocol.io) unter `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, zustandslos, Antworten als `application/json`). Darüber holt sich nrzDashboard die Werte für seine Übersicht – jeder andere MCP-Client geht genauso.
+
+1. *Einstellungen → MCP* (Admins): **Token erzeugen** und kopieren (es wird nur einmal angezeigt). Oder `NRZDNS_MCP_TOKEN` setzen.
+2. Im Client: URL `http://<host>:8380/mcp`, Kopfzeile `Authorization: Bearer <Token>`.
+3. Optional: **Änderungen über MCP erlauben** – sonst kann das Token nur lesen.
+
+| Werkzeug | Liefert / macht |
+|---|---|
+| `get_overview` `{range?}` | Alles für eine Übersichtskachel in einem Aufruf: Server (Version, Laufzeit, Anfragen/s, DNS-Ports), Sperren (`enabled`, `paused`, `active`, gesperrte Domains, Listen), Summen im Zeitraum (`queries`, `blocked`, `blockedPercent`, `cacheHitPercent`, `failed`, `clients`, `avgDurationMs` …), Weiterleitungen gesund/gesamt, Top 5 Clients, Domains und gesperrte Domains |
+| `get_statistics` `{range?, includeSeries?}` | Das ganze Dashboard: Summen, Zeitreihe, Top-10-Listen, Abfragetypen, Serverzustand |
+| `get_server_status`, `get_blocking_status` | Laufender Zustand; Sperren mit allen Listen |
+| `get_query_log` `{client?, qname?, qtype?, kind?, rcode?, from?, to?, limit?, page?}` | Letzte Anfragen, neueste zuerst |
+| `check_domain` `{domain}` | Würde gesperrt – und warum? |
+| `list_zones`, `list_rules` `{list}` | Eigene Zonen; eigene Sperren oder Ausnahmen |
+| `set_blocking` `{enabled}` ✎ | Filter ein- oder ausschalten (Einschalten beendet auch eine Pause) |
+| `pause_blocking` `{minutes}` ✎ | Filter pausieren, `0` setzt fort |
+| `set_blocklist` `{id \| name, enabled}` ✎ | Eine Sperrliste umschalten |
+| `update_blocklists` ✎ | Alle aktiven Listen jetzt neu laden |
+| `add_rule` / `remove_rule` `{list, domain, comment?}` ✎ | Eigene Sperren (`blocked`) oder Ausnahmen (`allowed`) |
+| `flush_cache` `{name?}` ✎ | Cache leeren, ganz oder für einen Namen |
+
+✎ = nur mit *Änderungen über MCP erlauben*; ohne fehlen diese Werkzeuge schon in der Liste. `range` ist `hour`, `day` (Vorgabe), `week` oder `month`. Jedes Ergebnis kommt als JSON-Text und als `structuredContent`.
+
+```bash
+curl -s http://localhost:8380/mcp -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_overview","arguments":{"range":"day"}}}'
+```
 
 ## Umbrel
 

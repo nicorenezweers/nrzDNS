@@ -6,6 +6,7 @@ mod auth;
 mod blocking;
 mod cache;
 mod logs;
+mod mcp;
 mod me;
 mod settings;
 mod zones;
@@ -23,6 +24,7 @@ pub fn routes() -> Vec<Route> {
     r.extend(blocking::routes());
     r.extend(cache::routes());
     r.extend(logs::routes());
+    r.extend(mcp::routes());
     r.extend(me::routes());
     r.extend(settings::routes());
     r.extend(zones::routes());

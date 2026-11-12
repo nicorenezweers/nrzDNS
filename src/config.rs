@@ -30,6 +30,9 @@ pub struct Config {
     /// Hintergrundarbeiten (DNS-Ports öffnen, Sperrlisten laden, Aufräumen) starten.
     /// Tests schalten sie aus.
     pub background: bool,
+    /// Fester Zugang zum MCP-Server (`/mcp`, `NRZDNS_MCP_TOKEN`, mindestens 16 Zeichen).
+    /// Gesetzt, gilt nur dieses Token; ein in der Oberfläche erzeugtes wird ignoriert.
+    pub mcp_token: Option<String>,
 }
 
 impl Default for Config {
@@ -40,6 +43,7 @@ impl Default for Config {
             registration_open: false,
             cookie_secure: false,
             background: true,
+            mcp_token: None,
         }
     }
 }
@@ -47,6 +51,14 @@ impl Default for Config {
 impl Config {
     pub fn database_path(&self) -> PathBuf {
         self.data_dir.join("nrzdns.db")
+    }
+
+    /// MCP-Token aus der Umgebung (leer = keins).
+    pub fn mcp_env_token(&self) -> Option<&str> {
+        self.mcp_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
     }
 
     /// Ordner für die zuletzt geladenen Fassungen der Sperrlisten.

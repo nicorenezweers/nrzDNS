@@ -37,56 +37,6 @@ pub fn routes() -> Vec<Route> {
     ]
 }
 
-/// Alles, was Routen zum Laden im Hintergrund brauchen.
-struct Ctx<'a> {
-    pool: &'a SqlitePool,
-    config: &'a Config,
-    engine: &'a Engine,
-    updater: &'a Updater,
-}
-
-impl Ctx<'_> {
-    /// Eine Liste im Hintergrund laden (nur mit `background = true`).
-    fn spawn_download(&self, id: i64) {
-        if !self.config.background {
-            return;
-        }
-        let (pool, config, engine, updater) = self.owned();
-        updater.mark_updating();
-        tokio::spawn(async move {
-            if let Err(e) = blocking::update_one(&pool, &config, &engine, &updater, id).await {
-                tracing::warn!(id, "Sperrliste laden: {e}");
-            }
-        });
-    }
-
-    fn owned(&self) -> (SqlitePool, Config, Engine, Updater) {
-        (
-            self.pool.clone(),
-            self.config.clone(),
-            self.engine.clone(),
-            self.updater.clone(),
-        )
-    }
-
-    async fn status(&self) -> AppResult<Json<BlockingStatus>> {
-        Ok(Json(
-            blocking::status(self.pool, self.engine, self.updater).await?,
-        ))
-    }
-}
-
-macro_rules! ctx {
-    ($pool:expr, $config:expr, $engine:expr, $updater:expr) => {
-        Ctx {
-            pool: $pool.inner(),
-            config: $config.inner(),
-            engine: $engine.inner(),
-            updater: $updater.inner(),
-        }
-    };
-}
-
 #[get("/blocking")]
 async fn status(
     _user: CurrentUser,
@@ -107,10 +57,9 @@ async fn create_list(
     engine: &State<Engine>,
     updater: &State<Updater>,
 ) -> AppResult<(Status, Json<BlockList>)> {
-    let ctx = ctx!(pool, config, engine, updater);
     let list = blocking::create(pool, &body).await?;
     if list.enabled {
-        ctx.spawn_download(list.id);
+        blocking::spawn_download(pool, config, engine, updater, list.id);
     }
     tracing::info!(list = %list.name, by = %admin.0.username, "Sperrliste angelegt");
     Ok((Status::Created, Json(list)))
@@ -127,18 +76,9 @@ async fn update_list(
     engine: &State<Engine>,
     updater: &State<Updater>,
 ) -> AppResult<Json<BlockList>> {
-    let ctx = ctx!(pool, config, engine, updater);
     let changed = blocking::update(pool, id, &body).await?;
-    let list = changed.list;
-    if !list.enabled {
-        engine.remove_block_list(list.id);
-    } else if changed.url_changed || list.last_updated_at.is_none() {
-        ctx.spawn_download(list.id);
-    } else {
-        // Umbenannt oder wieder aktiviert: die gespeicherte Fassung genügt
-        blocking::push_cached(engine, config, &list).await;
-    }
-    Ok(Json(list))
+    blocking::apply_change(pool, config, engine, updater, &changed).await;
+    Ok(Json(changed.list))
 }
 
 #[delete("/blocking/lists/<id>")]
@@ -163,18 +103,8 @@ async fn update_all(
     engine: &State<Engine>,
     updater: &State<Updater>,
 ) -> AppResult<Json<BlockingStatus>> {
-    let ctx = ctx!(pool, config, engine, updater);
-    if config.background {
-        let (pool, config, engine, updater) = ctx.owned();
-        updater.mark_updating();
-        tokio::spawn(async move {
-            match blocking::update_due(&pool, &config, &engine, &updater, true).await {
-                Ok(n) => tracing::info!("{n} Sperrlisten neu geladen"),
-                Err(e) => tracing::warn!("Sperrlisten laden: {e}"),
-            }
-        });
-    }
-    ctx.status().await
+    blocking::spawn_update_all(pool, config, engine, updater);
+    Ok(Json(blocking::status(pool, engine, updater).await?))
 }
 
 /// Sperren für `minutes` Minuten aussetzen; 0 setzt sofort fort.
