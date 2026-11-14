@@ -18,6 +18,10 @@ APP_DIR="${1:?APP_DATA_DIR fehlt}"
 DATA="${APP_DIR}/data"
 CONTAINER="${NRZ_CONTAINER:-nrz-dns_app_1}"
 CHAIN="NRZNETWORK"
+# NetBird im Userspace-Modus (umbrelOS-App, laeuft als Benutzer 1000 im Host-Netz) reicht
+# Verbindungen an seine Adresse lokal weiter - die laufen durch nat/OUTPUT, nicht PREROUTING.
+OUT_CHAIN="NRZNETWORK_OUT"
+NETBIRD="${NRZ_NETBIRD:-netbird_app_1}"
 PORT=81
 LOG="${DATA}/gateway.log"
 STATE="${DATA}/gateway.json"
@@ -46,10 +50,62 @@ if ! command -v iptables >/dev/null 2>&1; then
   exit 1
 fi
 
+remove_out() {
+  while iptables -w -t nat -D OUTPUT -j "${OUT_CHAIN}" 2>/dev/null; do :; done
+  iptables -w -t nat -F "${OUT_CHAIN}" 2>/dev/null || true
+  iptables -w -t nat -X "${OUT_CHAIN}" 2>/dev/null || true
+}
+
 remove_rules() {
   while iptables -w -t nat -D PREROUTING -j "${CHAIN}" 2>/dev/null; do :; done
   iptables -w -t nat -F "${CHAIN}" 2>/dev/null || true
   iptables -w -t nat -X "${CHAIN}" 2>/dev/null || true
+  remove_out
+}
+
+# Benutzer, als der NetBird laeuft (nur wenn nicht root - root heisst Kernel-Modus mit eigenem
+# Interface, das PREROUTING schon abdeckt).
+netbird_uid() {
+  local u
+  u="$(docker inspect -f '{{.Config.User}}' "${NETBIRD}" 2>/dev/null | cut -d: -f1)"
+  case "${u}" in
+    '' | 0 | root) return 1 ;;
+    *[!0-9]*) return 1 ;;
+    *) echo "${u}" ;;
+  esac
+}
+
+netbird_ip() {
+  docker exec "${NETBIRD}" netbird status --json 2>/dev/null \
+    | grep -o '"netbirdIp": *"[0-9.]*' | grep -o '[0-9.]*$'
+}
+
+# Lokale Verbindungen von NetBird auf Port 80 an den Proxy (ueber den veroeffentlichten
+# Port 81). Danach Selbsttest als dieser Benutzer: kommt nicht die Antwort des Proxys,
+# wird die Regel wieder entfernt.
+install_out() {
+  local uid="$1"
+  iptables -w -t nat -N "${OUT_CHAIN}" 2>/dev/null || iptables -w -t nat -F "${OUT_CHAIN}" || return 1
+  iptables -w -t nat -A "${OUT_CHAIN}" -p tcp --dport 80 -m addrtype --dst-type LOCAL \
+    -m owner --uid-owner "${uid}" -j REDIRECT --to-ports "${PORT}" || return 1
+  iptables -w -t nat -C OUTPUT -j "${OUT_CHAIN}" 2>/dev/null \
+    || iptables -w -t nat -I OUTPUT 1 -j "${OUT_CHAIN}" || return 1
+  as_user "${uid}" "exec 3<>/dev/tcp/127.0.0.1/80 \
+    && printf 'GET /.nrznetwork/health HTTP/1.0\r\nHost: nrznetwork\r\n\r\n' >&3 \
+    && grep -q nrznetwork-ok <&3"
+}
+
+# Befehl als dieser Benutzer (fuer den Selbsttest). Geht das nicht, gilt der Test als
+# fehlgeschlagen - die Regel wird dann nicht gesetzt.
+as_user() {
+  local uid="$1" cmd="$2" name
+  if setpriv --help 2>&1 | grep -q -- '--reuid'; then
+    setpriv --reuid="${uid}" --regid="${uid}" --clear-groups timeout 3 bash -c "${cmd}" 2>/dev/null
+    return
+  fi
+  name="$(getent passwd "${uid}" 2>/dev/null | cut -d: -f1)"
+  [ -n "${name}" ] || return 1
+  timeout 3 su -s /bin/bash "${name}" -c "${cmd}" 2>/dev/null
 }
 
 install_rules() {
@@ -77,10 +133,18 @@ healthy() {
     && grep -q nrznetwork-ok <&3" 2>/dev/null
 }
 
+IFACE_SKIP='^(docker|br-|veth|lo|virbr|vnet|tap|cni|flannel|kube|lxc|lxd)'
+
 host_addresses() {
-  ip -o -4 addr show scope global 2>/dev/null \
-    | awk '$2 !~ /^(docker|br-|veth|lo)/ { split($4, a, "/"); print a[1] }' \
-    | sort -u
+  {
+    ip -o -4 addr show scope global 2>/dev/null \
+      | awk -v skip="${IFACE_SKIP}" '$2 !~ skip { split($4, a, "/"); print a[1] }'
+    netbird_ip
+  } | sort -u
+}
+
+host_interfaces() {
+  ip -o -4 addr show scope global 2>/dev/null | awk '{ split($4, a, "/"); printf "%s=%s ", $2, a[1] }'
 }
 
 cleanup() {
@@ -94,19 +158,25 @@ trap cleanup TERM INT HUP
 
 log "Waechter gestartet (PID $$)"
 remove_rules
+log "Interfaces: $(host_interfaces)"
 active=""
+out_state=""
 fails=0
 missing=0
 last_addrs=""
+tick=0
 
 while :; do
-  addrs="$(host_addresses)"
-  if [ "${addrs}" != "${last_addrs}" ]; then
-    printf '%s\n' ${addrs} > "${DATA}/host-addresses.tmp" && mv -f "${DATA}/host-addresses.tmp" "${DATA}/host-addresses"
-    chown 1000:1000 "${DATA}/host-addresses" 2>/dev/null || true
-    log "Adressen des Geraets: $(echo ${addrs})"
-    last_addrs="${addrs}"
+  if [ $((tick % 6)) -eq 0 ]; then
+    addrs="$(host_addresses)"
+    if [ -n "${addrs}" ] && [ "${addrs}" != "${last_addrs}" ]; then
+      printf '%s\n' ${addrs} > "${DATA}/host-addresses.tmp" && mv -f "${DATA}/host-addresses.tmp" "${DATA}/host-addresses"
+      chown 1000:1000 "${DATA}/host-addresses" 2>/dev/null || true
+      log "Adressen des Geraets: $(echo ${addrs})"
+      last_addrs="${addrs}"
+    fi
   fi
+  tick=$((tick + 1))
 
   flag="$({ tr -d '[:space:]' < "${DATA}/port80"; } 2>/dev/null || echo on)"
   cip="$(container_ip)"
@@ -137,10 +207,25 @@ while :; do
     if [ "${active}" != "${cip}" ]; then
       if install_rules "${cip}"; then
         active="${cip}"
+        out_state=""
         log "Port 80 -> ${cip}:${PORT}"
       else
         remove_rules; active=""
         log "Regeln setzen fehlgeschlagen - Port 80 bleibt bei umbrelOS"
+      fi
+    fi
+    # NetBird (Userspace): einmal je Aktivierung versuchen, sonst alle 5 Minuten neu
+    if [ -n "${active}" ] && { [ -z "${out_state}" ] || { [ "${out_state}" = "aus" ] && [ $((tick % 60)) -eq 0 ]; }; }; then
+      if nb_uid="$(netbird_uid)"; then
+        if install_out "${nb_uid}"; then
+          out_state="an"
+          log "NetBird (Benutzer ${nb_uid}): Port 80 -> Proxy"
+        else
+          remove_out; out_state="aus"
+          log "NetBird-Weiterleitung greift nicht - NetBird-Port 80 bleibt bei umbrelOS"
+        fi
+      else
+        out_state="keins"
       fi
     fi
     if [ -n "${active}" ]; then
