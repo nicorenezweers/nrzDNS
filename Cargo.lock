@@ -1641,7 +1641,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns"
-version = "1.8.1"
+version = "1.9.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1688,7 +1688,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns-engine"
-version = "1.8.1"
+version = "1.9.0"
 dependencies = [
  "flate2",
  "hickory-proto",
@@ -1705,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns-types"
-version = "1.8.1"
+version = "1.9.0"
 dependencies = [
  "serde",
  "serde_json",

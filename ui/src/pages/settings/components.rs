@@ -226,7 +226,7 @@ fn Form(status: ComponentsStatus, version: Signal<u64>, cf_ok: bool, nb_ok: bool
                 }
             }
             Card { c: nb.clone(), title: tr("NetBird"),
-                p { class: "text-sm text-muted-foreground", {tr("nrzNetwork wird selbst ein Gerät im NetBird-Netz (ohne Sonderrechte, im Userspace). Anfragen an seine NetBird-Adresse landen beim Reverse Proxy und beim DNS-Server.")} }
+                p { class: "text-sm text-muted-foreground", {tr("nrzNetwork wird selbst ein Gerät im NetBird-Netz. Im Host-Modus mit echtem WireGuard-Interface: es erreicht alle Geräte, Netze und Ports und kann als Router dienen. Anfragen an seine NetBird-Adresse landen beim Reverse Proxy und beim DNS-Server.")} }
                 Toggle { checked: nb_on(), disabled: !admin, onchange: move |v| nb_on.set(v), label: tr("NetBird in nrzNetwork betreiben") }
                 Field { label: tr("Name im NetBird-Netz"),
                     input { class: "{INPUT} font-mono text-[13px]", disabled: !admin, maxlength: 60, value: "{nb_name}", oninput: move |e| nb_name.set(e.value()) }

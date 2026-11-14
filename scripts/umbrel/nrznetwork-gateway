@@ -126,10 +126,10 @@ install_rules() {
     iptables -w -t nat -A "${CHAIN}" -i "${i}" -j RETURN || return 1
   done
   iptables -w -t nat -A "${CHAIN}" -p tcp --dport 80 -m addrtype --dst-type LOCAL \
-    -j DNAT --to-destination "${ip}:${PORT}" || return 1
+    -j $(target "${ip}" "${PORT}") || return 1
   if [ "${tls}" = "on" ]; then
     iptables -w -t nat -A "${CHAIN}" -p tcp --dport 443 -m addrtype --dst-type LOCAL \
-      -j DNAT --to-destination "${ip}:${TLS_PORT}" || return 1
+      -j $(target "${ip}" "${TLS_PORT}") || return 1
   fi
   iptables -w -t nat -C PREROUTING -j "${CHAIN}" 2>/dev/null \
     || iptables -w -t nat -I PREROUTING 1 -j "${CHAIN}" || return 1
@@ -140,9 +140,28 @@ tls_listening() {
   timeout 2 bash -c "exec 3<>/dev/tcp/$1/${TLS_PORT}" 2>/dev/null
 }
 
+# Host-Modus: der Container teilt das Netz des Geraets – dann zaehlt 127.0.0.1.
 container_ip() {
+  local mode running
+  running="$(docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null)"
+  [ "${running}" = "true" ] || return 0
+  mode="$(docker inspect -f '{{.HostConfig.NetworkMode}}' "${CONTAINER}" 2>/dev/null)"
+  if [ "${mode}" = "host" ]; then
+    echo 127.0.0.1
+    return 0
+  fi
   docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "${CONTAINER}" 2>/dev/null \
     | awk '{print $1}'
+}
+
+# Ziel einer Regel: im Host-Modus lokal umleiten, sonst an die Container-Adresse.
+target() {
+  local ip="$1" port="$2"
+  if [ "${ip}" = "127.0.0.1" ]; then
+    echo "REDIRECT --to-ports ${port}"
+  else
+    echo "DNAT --to-destination ${ip}:${port}"
+  fi
 }
 
 healthy() {

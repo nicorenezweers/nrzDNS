@@ -224,6 +224,31 @@ fn ca_bundle(data: &Path) -> AppResult<PathBuf> {
     Ok(path)
 }
 
+/// NetBird mit echtem Interface betreiben? Geht nur als root mit `/dev/net/tun`
+/// (`NRZDNS_NETBIRD_MODE=netstack|kernel` erzwingt eines).
+pub fn netbird_kernel_mode() -> bool {
+    match std::env::var("NRZDNS_NETBIRD_MODE")
+        .unwrap_or_default()
+        .trim()
+    {
+        "netstack" => false,
+        "kernel" => true,
+        _ => is_root() && Path::new("/dev/net/tun").exists(),
+    }
+}
+
+fn is_root() -> bool {
+    // Ohne libc: die effektive Benutzer-ID steht in /proc/self/status („Uid: real effektiv …“)
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("Uid:"))
+                .map(|l| l.split_whitespace().nth(2) == Some("0"))
+        })
+        .unwrap_or(false)
+}
+
 /// Neueste Version auf GitHub: (Tag, Download-URL, SHA-256 oder leer).
 async fn latest_release(config: &Config, name: &str) -> AppResult<(String, String, String)> {
     let (repo, asset) = match name {
@@ -420,9 +445,14 @@ impl Components {
             && (registered || !s.netbird_setup_key.is_empty()))
         .then(|| {
             let mut env = base_env.clone();
+            // Mit Rechten (root und /dev/net/tun, z. B. Host-Modus) echtes WireGuard-Interface:
+            // nrzNetwork wird vollwertiges Gerät und Router im NetBird-Netz. Sonst Netstack.
+            let kernel = netbird_kernel_mode();
+            if !kernel {
+                env.push(("NB_USE_NETSTACK_MODE".into(), "true".into()));
+                env.push(("NB_ENABLE_NETSTACK_LOCAL_FORWARDING".into(), "true".into()));
+            }
             for (k, v) in [
-                ("NB_USE_NETSTACK_MODE", "true"),
-                ("NB_ENABLE_NETSTACK_LOCAL_FORWARDING", "true"),
                 ("NB_STATE_DIR", &nb_dir.display().to_string()),
                 (
                     "NB_CONFIG",
@@ -445,8 +475,10 @@ impl Components {
                     s.settings.netbird_hostname.trim().to_string()
                 },
                 "--disable-dns".into(),
-                "--disable-client-routes".into(),
             ];
+            if !kernel {
+                args.push("--disable-client-routes".into());
+            }
             if !s.netbird_setup_key.is_empty() && !registered {
                 args.push("--setup-key".into());
                 args.push(s.netbird_setup_key.clone());
