@@ -102,6 +102,8 @@ struct Inner {
     actions: Mutex<HashMap<IpAddr, Vec<i64>>>,
     tls: tls::TlsRuntime,
     access: access::AccessBuffer,
+    /// Alle Adressen, die das Gerät je hatte.
+    known: Mutex<Vec<IpAddr>>,
 }
 
 /// Kennzeichnet weitergereichte Anfragen – kommt eine davon wieder an, zeigt ein Eintrag auf
@@ -114,6 +116,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 impl ProxyState {
     pub fn new(ctx: ProxyContext) -> Self {
+        let ctx_known_path = ctx.data_dir.join("known-addresses");
         Self(Arc::new(Inner {
             ctx,
             routes: RwLock::default(),
@@ -122,6 +125,11 @@ impl ProxyState {
             actions: Mutex::default(),
             tls: tls::TlsRuntime::default(),
             access: access::AccessBuffer::default(),
+            known: Mutex::new(
+                std::fs::read_to_string(ctx_known_path)
+                    .map(|s| s.lines().filter_map(|l| l.trim().parse().ok()).collect())
+                    .unwrap_or_default(),
+            ),
         }))
     }
 
@@ -191,15 +199,50 @@ impl ProxyState {
         let Ok(ip) = t.host.parse::<IpAddr>() else {
             return t.authority.clone();
         };
-        if ip.is_loopback() || self.0.ctx.engine.device_addresses().contains(&ip) {
+        if self.on_device(ip) {
             format!("{gw}:{}", t.port())
         } else {
             t.authority.clone()
         }
     }
 
+    /// Liegt `ip` auf diesem Gerät? Aktuelle Adressen, frühere Adressen (z. B. die alte
+    /// NetBird-Adresse nach einer Neuinstallation) – und NetBird-Adressen (100.64.0.0/10),
+    /// solange das Gerät selbst keine hat: dann sind sie vom Gerät aus ohnehin nicht
+    /// erreichbar und meinen fast immer seine frühere eigene Adresse.
+    fn on_device(&self, ip: IpAddr) -> bool {
+        if ip.is_loopback() {
+            return true;
+        }
+        let current = self.0.ctx.engine.device_addresses();
+        if current.contains(&ip) || lock(&self.0.known).contains(&ip) {
+            return true;
+        }
+        let cgnat = |a: &IpAddr| matches!(a, IpAddr::V4(v) if v.octets()[0] == 100 && (64..128).contains(&v.octets()[1]));
+        cgnat(&ip) && !current.iter().any(cgnat)
+    }
+
+    /// Adressen des Geräts merken (dauerhaft in `known-addresses`).
+    pub fn remember_addresses(&self, addrs: &[IpAddr]) {
+        let mut known = lock(&self.0.known);
+        let before = known.len();
+        for a in addrs {
+            if !known.contains(a) && !a.is_loopback() && !a.is_unspecified() {
+                known.push(*a);
+            }
+        }
+        if known.len() != before {
+            let text: String = known.iter().map(|a| format!("{a}\n")).collect();
+            if let Err(e) = std::fs::write(self.0.ctx.data_dir.join("known-addresses"), text) {
+                tracing::warn!("known-addresses schreiben: {e}");
+            }
+        }
+    }
+
     fn is_device(&self, ip: IpAddr) -> bool {
-        ip.is_loopback() || self.0.ctx.engine.device_addresses().contains(&ip)
+        ip.is_loopback()
+            || self.0.ctx.engine.device_addresses().contains(&ip)
+            || lock(&self.0.known).contains(&ip)
     }
 
     /// Gesperrt (Sperren an, nicht pausiert, keine Ausnahme)? Liefert die Treffer.

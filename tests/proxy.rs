@@ -339,3 +339,42 @@ async fn block_page_unlock_and_request() {
     let (_, v) = get(&client, "/api/v1/allowed").await;
     assert_eq!(v[0]["domain"], "tracker.example.net", "{v}");
 }
+
+/// Ziel auf einer NetBird-Adresse, die das Gerät gerade nicht hat (z. B. NetBird-App
+/// entfernt): über das Gerät verbinden statt ins Leere.
+#[rocket::async_test]
+async fn former_netbird_address_goes_through_device() {
+    let (client, _dir) = common::client_with(|f| f.merge(("host_gateway", "127.0.0.1"))).await;
+    login_as(&client, "admin", true).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let be = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut s, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let _ = s.read(&mut buf).await;
+                let _ = s
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ngeraet",
+                    )
+                    .await;
+            });
+        }
+    });
+    let (s, v) = post(
+        &client,
+        "/api/v1/proxy/hosts",
+        json!({ "host": "music.nrz.local", "target": format!("http://100.78.107.162:{be}") }),
+    )
+    .await;
+    assert_eq!(s, Status::Created, "{v}");
+    let port = start_proxy(&client).await;
+    let out = http(port, "music.nrz.local", "/").await;
+    assert!(
+        out.starts_with("HTTP/1.1 200") && out.ends_with("geraet"),
+        "{out}"
+    );
+}

@@ -18,6 +18,7 @@ pub async fn push_zones(pool: &SqlitePool, engine: &Engine) -> AppResult<()> {
 pub async fn push_proxy(pool: &SqlitePool, engine: &Engine, state: &ProxyState) -> AppResult<()> {
     let settings = proxy::settings(pool).await?;
     let device = proxy::device_addresses(&settings, state.data_dir());
+    state.remember_addresses(&device);
     let hosts = proxy::list(pool, &device).await?;
     state.set_routes(proxy::routes(pool).await?);
     state.set_settings(settings);
