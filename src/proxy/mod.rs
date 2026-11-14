@@ -15,6 +15,7 @@
 //! Weiterleitungen des Ziels auf seine eigene Adresse werden auf den Namen umgeschrieben.
 
 mod page;
+pub mod tls;
 
 use crate::services::unlocks;
 use hyper::client::HttpConnector;
@@ -40,6 +41,22 @@ pub const ACTION_PREFIX: &str = "/.nrznetwork/";
 pub const HEALTH_BODY: &str = "nrznetwork-ok";
 /// Höchstens so viele Aktionen (freischalten, beantragen) je Client in 10 Minuten.
 const ACTIONS_PER_WINDOW: usize = 20;
+
+/// Wie die Anfrage hereinkam.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scheme {
+    Http,
+    Https,
+}
+
+impl Scheme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Scheme::Http => "http",
+            Scheme::Https => "https",
+        }
+    }
+}
 
 /// Ziel eines Eintrags.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +85,8 @@ pub struct ProxyContext {
     pub data_dir: PathBuf,
     pub host_gateway: Option<String>,
     pub fallback: Option<Target>,
+    /// HTTPS für fremde Namen unverändert hierhin (`host:port`, auf Umbrel umbrelOS).
+    pub tls_fallback: Option<String>,
 }
 
 /// Ziele, Einstellungen und Fehler beim Öffnen der Ports (Rocket-State, günstig zu klonen).
@@ -80,6 +99,7 @@ struct Inner {
     settings: RwLock<ProxySettings>,
     errors: Mutex<Vec<String>>,
     actions: Mutex<HashMap<IpAddr, Vec<i64>>>,
+    tls: tls::TlsRuntime,
 }
 
 /// Kennzeichnet weitergereichte Anfragen – kommt eine davon wieder an, zeigt ein Eintrag auf
@@ -98,6 +118,7 @@ impl ProxyState {
             settings: RwLock::default(),
             errors: Mutex::default(),
             actions: Mutex::default(),
+            tls: tls::TlsRuntime::default(),
         }))
     }
 
@@ -266,7 +287,9 @@ async fn accept(
         let state = state.clone();
         let client = client.clone();
         tokio::spawn(async move {
-            let service = service_fn(move |req| handle(state.clone(), client.clone(), peer, req));
+            let service = service_fn(move |req| {
+                handle(state.clone(), client.clone(), peer, Scheme::Http, req)
+            });
             if let Err(e) = Http::new()
                 .http1_only(true)
                 .http1_keep_alive(true)
@@ -354,6 +377,7 @@ async fn handle(
     state: ProxyState,
     client: Client<HttpConnector>,
     peer: SocketAddr,
+    scheme: Scheme,
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
     let lang = page::Lang::from_headers(req.headers());
@@ -378,11 +402,21 @@ async fn handle(
         ));
     }
 
-    // 1. Eintrag
+    // 1. Eintrag (mit Zertifikat und eingeschalteter Umleitung: erst auf HTTPS)
     if let Some(target) = state.route(&host) {
+        if scheme == Scheme::Http
+            && state
+                .tls()
+                .redirect
+                .load(std::sync::atomic::Ordering::Relaxed)
+            && state.tls().covers(&host)
+            && !req.uri().path().starts_with(ACTION_PREFIX)
+        {
+            return Ok(https_redirect(&req, &host));
+        }
         let authority = state.connect_authority(&target);
         return Ok(forward(
-            &client, req, peer, &host, &raw_host, &target, &authority, lang,
+            &client, req, peer, scheme, &host, &raw_host, &target, &authority, lang,
         )
         .await);
     }
@@ -408,7 +442,10 @@ async fn handle(
         return Ok(match fallback {
             Some(t) => {
                 let authority = t.authority.clone();
-                forward(&client, req, peer, &host, &raw_host, &t, &authority, lang).await
+                forward(
+                    &client, req, peer, scheme, &host, &raw_host, &t, &authority, lang,
+                )
+                .await
             }
             None => page::message(
                 lang,
@@ -433,7 +470,10 @@ async fn handle(
                 host: host.clone(),
                 base: String::new(),
             };
-            Ok(forward(&client, req, peer, &host, &raw_host, &t, &authority, lang).await)
+            Ok(forward(
+                &client, req, peer, scheme, &host, &raw_host, &t, &authority, lang,
+            )
+            .await)
         }
         None => Ok(page::message(
             lang,
@@ -452,6 +492,7 @@ async fn forward(
     client: &Client<HttpConnector>,
     mut req: Request<Body>,
     peer: SocketAddr,
+    scheme: Scheme,
     host: &str,
     raw_host: &str,
     target: &Target,
@@ -494,9 +535,11 @@ async fn forward(
             headers.insert(name, v);
         }
     }
-    if !headers.contains_key("x-forwarded-proto") {
-        headers.insert("x-forwarded-proto", HeaderValue::from_static("http"));
-    }
+    // Immer selbst setzen – ein Client soll nicht „https“ vortäuschen können
+    headers.insert(
+        "x-forwarded-proto",
+        HeaderValue::from_static(scheme.as_str()),
+    );
     headers.insert(LOOP_HEADER, HeaderValue::from_static("1"));
 
     let mut resp = match client.request(Request::from_parts(parts, body)).await {
@@ -532,12 +575,28 @@ async fn forward(
     }
 
     strip_hop_by_hop(resp.headers_mut());
-    rewrite_location(resp.headers_mut(), target, authority, raw_host);
+    rewrite_location(resp.headers_mut(), target, authority, raw_host, scheme);
     resp
 }
 
-/// `Location: http://<ziel>/…` → `http://<name>/…` (ohne den Pfad davor).
-fn rewrite_location(headers: &mut HeaderMap, target: &Target, connected: &str, raw_host: &str) {
+/// `https://<name>/<pfad>` (308, Methode bleibt).
+fn https_redirect(req: &Request<Body>, host: &str) -> Response<Body> {
+    let pq = req.uri().path_and_query().map_or("/", |p| p.as_str());
+    Response::builder()
+        .status(StatusCode::PERMANENT_REDIRECT)
+        .header(header::LOCATION, format!("https://{host}{pq}"))
+        .body(Body::empty())
+        .unwrap_or_default()
+}
+
+/// `Location: http://<ziel>/…` → `<schema>://<name>/…` (ohne den Pfad davor).
+fn rewrite_location(
+    headers: &mut HeaderMap,
+    target: &Target,
+    connected: &str,
+    raw_host: &str,
+    scheme: Scheme,
+) {
     let Some(loc) = headers.get(header::LOCATION).and_then(|v| v.to_str().ok()) else {
         return;
     };
@@ -559,7 +618,7 @@ fn rewrite_location(headers: &mut HeaderMap, target: &Target, connected: &str, r
         }
         let rest = rest.strip_prefix(target.base.as_str()).unwrap_or(rest);
         let rest = if rest.is_empty() { "/" } else { rest };
-        if let Ok(v) = HeaderValue::from_str(&format!("http://{raw_host}{rest}")) {
+        if let Ok(v) = HeaderValue::from_str(&format!("{}://{raw_host}{rest}", scheme.as_str())) {
             headers.insert(header::LOCATION, v);
         }
         return;
@@ -693,19 +752,37 @@ mod tests {
             header::LOCATION,
             HeaderValue::from_static("http://100.78.107.162:8350/login?x=1"),
         );
-        rewrite_location(&mut h, &t, "host.docker.internal:8350", "music.nrz.ch");
+        rewrite_location(
+            &mut h,
+            &t,
+            "host.docker.internal:8350",
+            "music.nrz.ch",
+            Scheme::Http,
+        );
         assert_eq!(h[header::LOCATION], "http://music.nrz.ch/login?x=1");
         h.insert(
             header::LOCATION,
             HeaderValue::from_static("http://host.docker.internal:8350/a"),
         );
-        rewrite_location(&mut h, &t, "host.docker.internal:8350", "music.nrz.ch");
-        assert_eq!(h[header::LOCATION], "http://music.nrz.ch/a");
+        rewrite_location(
+            &mut h,
+            &t,
+            "host.docker.internal:8350",
+            "music.nrz.ch",
+            Scheme::Https,
+        );
+        assert_eq!(h[header::LOCATION], "https://music.nrz.ch/a");
         h.insert(
             header::LOCATION,
             HeaderValue::from_static("http://100.78.107.162:83500/"),
         );
-        rewrite_location(&mut h, &t, "100.78.107.162:8350", "music.nrz.ch");
+        rewrite_location(
+            &mut h,
+            &t,
+            "100.78.107.162:8350",
+            "music.nrz.ch",
+            Scheme::Https,
+        );
         assert_eq!(h[header::LOCATION], "http://100.78.107.162:83500/");
     }
 

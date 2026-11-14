@@ -36,6 +36,7 @@ async fn build_status(
         settings,
         device_addresses: device.iter().map(ToString::to_string).collect(),
         gateway: proxy::gateway_status(&config.data_dir),
+        https_names: state.tls().cert().map(|c| c.names).unwrap_or_default(),
     })
 }
 

@@ -11,6 +11,7 @@ mod me;
 mod proxy;
 mod requests;
 mod settings;
+mod tls;
 mod tools;
 mod zones;
 
@@ -32,6 +33,7 @@ pub fn routes() -> Vec<Route> {
     r.extend(proxy::routes());
     r.extend(requests::routes());
     r.extend(settings::routes());
+    r.extend(tls::routes());
     r.extend(tools::routes());
     r.extend(zones::routes());
     r

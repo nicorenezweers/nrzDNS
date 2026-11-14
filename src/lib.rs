@@ -72,7 +72,14 @@ pub async fn build_with(figment: Figment) -> Result<Rocket<Build>, error::AppErr
             .filter(|g| !g.is_empty())
             .map(str::to_string),
         fallback,
+        tls_fallback: config
+            .tls_fallback
+            .as_deref()
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+            .map(str::to_string),
     });
+    services::tls::load(&pool, &proxy, &config.data_dir).await?;
     services::sync::push_proxy(&pool, &engine, &proxy).await?;
     services::proxy::write_port80_flag(&config.data_dir, &services::proxy::settings(&pool).await?);
 

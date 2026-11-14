@@ -9,11 +9,27 @@ use crate::state;
 use crate::ui::alert::{Alert, AlertDescription, AlertTitle};
 use crate::ui::table::*;
 use dioxus::prelude::*;
-use nrzdns_types::{GatewayStatus, ProxyHost, ProxyHostInput, ProxySettings, ProxyStatus};
+use nrzdns_types::{
+    GatewayStatus, ProxyHost, ProxyHostInput, ProxySettings, ProxyStatus, TlsSettings,
+    TlsSettingsInput, TlsStatus,
+};
+
+/// Passt `host` zu einem Namen im Zertifikat (`*.zweers.ch` = genau eine Ebene)?
+pub fn https_covers(names: &[String], host: &str) -> bool {
+    names.iter().any(|n| match n.strip_prefix("*.") {
+        Some(base) => host
+            .strip_suffix(base)
+            .and_then(|l| l.strip_suffix('.'))
+            .is_some_and(|l| !l.is_empty() && !l.contains('.')),
+        None => n == host,
+    })
+}
 
 /// Adresse, unter der Browser den Namen öffnen.
-fn url(host: &str, port: u16) -> String {
-    if port == 80 || port == 0 {
+fn url(host: &str, port: u16, https: &[String]) -> String {
+    if https_covers(https, host) {
+        format!("https://{host}/")
+    } else if port == 80 || port == 0 {
         format!("http://{host}/")
     } else {
         format!("http://{host}:{port}/")
@@ -36,7 +52,7 @@ pub fn Proxy() -> Element {
                 icons::Waypoints {}
                 AlertTitle { {tr("So funktioniert es")} }
                 AlertDescription {
-                    p { {tr("Trage einen Namen und das Ziel ein. nrzNetwork beantwortet den Namen mit der Adresse dieses Geräts, und der Proxy reicht jede HTTP-Anfrage für diesen Namen an das Ziel weiter – Ports spielen für den Browser keine Rolle mehr. Die Domain muss dir nicht gehören: Es klappt auf allen Geräten, die nrzNetwork als DNS-Server benutzen. Nur HTTP, kein HTTPS.")} }
+                    p { {tr("Trage einen Namen und das Ziel ein. nrzNetwork beantwortet den Namen mit der Adresse dieses Geräts, und der Proxy reicht jede HTTP-Anfrage für diesen Namen an das Ziel weiter – Ports spielen für den Browser keine Rolle mehr. Die Domain muss dir nicht gehören: Es klappt auf allen Geräten, die nrzNetwork als DNS-Server benutzen. HTTPS gibt es für eigene Domains bei Cloudflare (unten).")} }
                 }
             }
             if !admin {
@@ -56,6 +72,7 @@ pub fn Proxy() -> Element {
                         Callout { text: trf("Der Proxy läuft auf Port {0} – Namen also mit Port öffnen, z. B. http://music.nrz.ch:{0}/.", &[&s.port.to_string()]) }
                     }
                     Hosts { status: s.clone(), version }
+                    HttpsSection { version }
                     AddressSection { settings: s.settings.clone(), device: s.device_addresses.clone(), gateway: s.gateway.clone(), version }
                 },
             }
@@ -158,7 +175,7 @@ fn Hosts(status: ProxyStatus, version: Signal<u64>) -> Element {
                             }
                             TableBody {
                                 for h in status.hosts.iter().cloned() {
-                                    HostRow { key: "{h.id}", host: h, port, version, editing }
+                                    HostRow { key: "{h.id}", host: h, port, https: status.https_names.clone(), version, editing }
                                 }
                             }
                         }
@@ -174,6 +191,7 @@ fn Hosts(status: ProxyStatus, version: Signal<u64>) -> Element {
 fn HostRow(
     host: ProxyHost,
     port: u16,
+    https: Vec<String>,
     version: Signal<u64>,
     editing: Signal<Option<ProxyHost>>,
 ) -> Element {
@@ -194,7 +212,7 @@ fn HostRow(
             }
         });
     };
-    let link = url(&host.host, port);
+    let link = url(&host.host, port, &https);
     rsx! {
         TableRow {
             TableCell { class: "font-mono text-[13px] break-all",
@@ -420,6 +438,228 @@ fn AddressSection(
                 if admin {
                     div { class: "flex justify-end",
                         button { class: btn(BTN_PRIMARY), r#type: "submit", disabled: busy(), {tr("Speichern")} }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// HTTPS für eigene Domains: Let's Encrypt, Nachweis über Cloudflare.
+#[component]
+fn HttpsSection(version: Signal<u64>) -> Element {
+    let admin = state::is_admin();
+    let mut tick = use_signal(|| 0u64);
+    let status = use_resource(move || async move {
+        let _ = (tick(), version());
+        api::get::<TlsStatus>("/tls").await
+    });
+    let mut was_issuing = use_signal(|| false);
+    // Solange ein Zertifikat geholt wird, alle 2 s nachfragen; danach die Liste neu laden
+    // (Links werden zu https://)
+    use_effect(move || {
+        let issuing = matches!(&*status.read(), Some(Ok(s)) if s.issuing);
+        if issuing {
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(2000).await;
+                tick += 1;
+            });
+        } else if *was_issuing.peek() {
+            was_issuing.set(false);
+            version += 1;
+        }
+    });
+    match &*status.read() {
+        None => rsx! {},
+        Some(Err(e)) => rsx! { Callout { text: e.message.clone(), error: true } },
+        Some(Ok(s)) => rsx! {
+            HttpsForm { key: "{s.settings.domains.join(\",\")}-{s.token_set}", status: s.clone(), admin, tick, was_issuing }
+        },
+    }
+}
+
+#[component]
+fn HttpsForm(
+    status: TlsStatus,
+    admin: bool,
+    tick: Signal<u64>,
+    was_issuing: Signal<bool>,
+) -> Element {
+    let s = status.settings.clone();
+    let mut enabled = use_signal(|| s.enabled);
+    let mut domains = use_signal(|| {
+        if s.domains.is_empty() {
+            String::new()
+        } else {
+            s.domains.join(", ")
+        }
+    });
+    let mut email = use_signal(|| s.email.clone());
+    let mut token = use_signal(String::new);
+    let mut staging = use_signal(|| s.staging);
+    let mut redirect = use_signal(|| s.redirect_http);
+    let mut busy = use_signal(|| false);
+
+    let input = move || TlsSettingsInput {
+        settings: TlsSettings {
+            enabled: enabled(),
+            domains: domains()
+                .split([',', ' ', '\n'])
+                .map(str::trim)
+                .filter(|d| !d.is_empty())
+                .map(str::to_string)
+                .collect(),
+            email: email().trim().to_string(),
+            staging: staging(),
+            redirect_http: redirect(),
+        },
+        cloudflare_token: token().trim().to_string(),
+        clear_token: false,
+    };
+    let save = move |e: FormEvent| {
+        e.prevent_default();
+        spawn(async move {
+            busy.set(true);
+            let res = api::put::<TlsStatus, _>("/tls", &input()).await;
+            busy.set(false);
+            match res {
+                Ok(_) => {
+                    token.set(String::new());
+                    toast(tr("Gespeichert."));
+                    tick += 1;
+                }
+                Err(e) => toast_error(e),
+            }
+        });
+    };
+    let issue = move |_| {
+        spawn(async move {
+            busy.set(true);
+            // Erst speichern (falls etwas geändert wurde), dann holen
+            let saved = api::put::<TlsStatus, _>("/tls", &input()).await;
+            let res = match saved {
+                Ok(_) => api::action::<TlsStatus>("/tls/issue").await,
+                Err(e) => Err(e),
+            };
+            busy.set(false);
+            match res {
+                Ok(_) => {
+                    token.set(String::new());
+                    was_issuing.set(true);
+                    tick += 1;
+                }
+                Err(e) => toast_error(e),
+            }
+        });
+    };
+    let remove = move |_| {
+        spawn(async move {
+            let ask = Ask::new(
+                tr("Zertifikat entfernen?"),
+                tr("HTTPS für diese Namen ist dann aus, bis ein neues Zertifikat geholt wird."),
+            )
+            .confirm(tr("Entfernen"))
+            .destructive();
+            if !confirm(ask).await {
+                return;
+            }
+            match api::delete("/tls/certificate").await {
+                Ok(()) => tick += 1,
+                Err(e) => toast_error(e),
+            }
+        });
+    };
+    let cert = status.certificate.clone();
+    let days_left = cert
+        .as_ref()
+        .map(|c| (c.not_after - crate::util::now()) / 86_400);
+    rsx! {
+        Section {
+            title: tr("HTTPS für eigene Domains"),
+            description: tr("Echtes Zertifikat von Let's Encrypt für deine Domain bei Cloudflare, z. B. *.zweers.ch – dann öffnen sich die Einträge als https://music.zweers.ch ohne Warnung. Der Nachweis läuft über einen kurzen TXT-Eintrag bei Cloudflare, von aussen muss nichts erreichbar sein. Erneuert sich von selbst."),
+            form { class: "grid grid-cols-1 gap-5", onsubmit: save,
+                for e in status.listen_errors.iter() {
+                    Callout { key: "{e}", text: trf("HTTPS-Port konnte nicht geöffnet werden: {0}", &[e]), error: true }
+                }
+                match &cert {
+                    Some(c) => rsx! {
+                        div { class: "grid grid-cols-1 gap-3 rounded-lg border p-3 sm:grid-cols-3",
+                            div {
+                                p { class: "text-xs text-muted-foreground", {tr("Zertifikat für")} }
+                                p { class: "mt-0.5 font-mono text-[13px] break-all", "{c.names.join(\", \")}" }
+                            }
+                            div {
+                                p { class: "text-xs text-muted-foreground", {tr("Gültig bis")} }
+                                p { class: if days_left.unwrap_or(0) < 14 { "mt-0.5 text-sm text-amber-500" } else { "mt-0.5 text-sm" },
+                                    {format!("{} ({})", crate::util::datetime(c.not_after), trf("noch {0} Tage", &[&days_left.unwrap_or(0).max(0).to_string()]))}
+                                }
+                            }
+                            div {
+                                p { class: "text-xs text-muted-foreground", {tr("Ausgestellt von")} }
+                                p { class: "mt-0.5 text-sm break-all", "{c.issuer}" }
+                            }
+                        }
+                    },
+                    None => rsx! {},
+                }
+                if status.issuing || !status.progress.is_empty() {
+                    div { class: "rounded-lg border bg-muted/30 p-3 text-sm",
+                        p { class: "mb-1 flex items-center gap-2 font-medium",
+                            if status.issuing { icons::LoaderCircle { class: "size-4 animate-spin" } {tr("Zertifikat wird geholt …")} } else { {tr("Letzter Versuch")} }
+                        }
+                        for (i, step) in status.progress.iter().enumerate() {
+                            p { key: "{i}", class: if step.starts_with("Fehlgeschlagen") { "text-destructive break-words" } else { "text-muted-foreground break-words" }, "{step}" }
+                        }
+                    }
+                }
+                Toggle { checked: enabled(), disabled: !admin, onchange: move |v| enabled.set(v),
+                    label: tr("HTTPS einschalten"),
+                    hint: tr("Der Proxy nimmt dann auch https:// an. Andere HTTPS-Seiten auf diesem Gerät (z. B. umbrelOS) reicht er unverändert weiter."),
+                }
+                div { class: "grid grid-cols-1 gap-4 sm:grid-cols-2",
+                    Field { label: tr("Namen im Zertifikat"), hint: tr("Durch Kommas getrennt. *.zweers.ch deckt music.zweers.ch, dns.zweers.ch … ab, zweers.ch selbst extra angeben."),
+                        input { class: "{INPUT} font-mono text-[13px]", disabled: !admin, spellcheck: false, autocapitalize: "none",
+                            placeholder: "zweers.ch, *.zweers.ch", value: "{domains}", oninput: move |e| domains.set(e.value()) }
+                    }
+                    Field { label: tr("E-Mail für Let's Encrypt (optional)"), hint: tr("Für Hinweise, falls die Erneuerung einmal nicht klappt."),
+                        input { class: INPUT, disabled: !admin, r#type: "email", autocomplete: "email", placeholder: "admin@zweers.ch", value: "{email}", oninput: move |e| email.set(e.value()) }
+                    }
+                }
+                Field {
+                    label: tr("Cloudflare-API-Token"),
+                    hint: tr("In Cloudflare: Profil → API-Tokens → Token erstellen → Vorlage „Zone-DNS bearbeiten“ → Zone zweers.ch. Wird nur auf diesem Gerät gespeichert und nie wieder angezeigt."),
+                    input {
+                        class: "{INPUT} font-mono text-[13px]",
+                        disabled: !admin,
+                        r#type: "password",
+                        autocomplete: "off",
+                        spellcheck: false,
+                        placeholder: if status.token_set { tr("gespeichert – leer lassen, um es zu behalten") } else { tr("Token einfügen") },
+                        value: "{token}",
+                        oninput: move |e| token.set(e.value()),
+                    }
+                }
+                Toggle { checked: redirect(), disabled: !admin, onchange: move |v| redirect.set(v),
+                    label: tr("http:// auf https:// umleiten"),
+                    hint: tr("Nur für Einträge, deren Name im Zertifikat steht."),
+                }
+                Toggle { checked: staging(), disabled: !admin, onchange: move |v| staging.set(v),
+                    label: tr("Testzertifikat (Let's Encrypt Staging)"),
+                    hint: tr("Zum Ausprobieren ohne Limits – Browser zeigen dafür eine Warnung."),
+                }
+                if !status.last_error.is_empty() && !status.issuing {
+                    Callout { text: status.last_error.clone(), error: true }
+                }
+                if admin {
+                    div { class: "flex flex-wrap justify-end gap-2",
+                        if cert.is_some() {
+                            button { class: btn(BTN_GHOST), r#type: "button", onclick: remove, {tr("Zertifikat entfernen")} }
+                        }
+                        button { class: btn(BTN_OUTLINE), r#type: "submit", disabled: busy() || status.issuing, {tr("Speichern")} }
+                        button { class: btn(BTN_PRIMARY), r#type: "button", disabled: busy() || status.issuing || !enabled(), onclick: issue,
+                            icons::ShieldCheck {}
+                            if cert.is_some() { {tr("Jetzt erneuern")} } else { {tr("Zertifikat holen")} }
+                        }
                     }
                 }
             }

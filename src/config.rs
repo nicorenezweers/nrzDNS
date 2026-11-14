@@ -33,6 +33,22 @@ pub struct Config {
     /// Ziel für Namen ohne Eintrag, IP-Adressen und `.local`-Namen (`NRZDNS_PROXY_FALLBACK`,
     /// auf Umbrel `http://host.docker.internal:80` = umbrelOS), wenn der Proxy Port 80 hat.
     pub proxy_fallback: Option<String>,
+    /// HTTPS-Eingang (`NRZDNS_PROXY_TLS_LISTEN`, Vorgabe `0.0.0.0:443`, leer = keiner). Nur
+    /// Namen mit eigenem Zertifikat beantwortet nrzNetwork selbst, der Rest geht an
+    /// `tls_fallback`.
+    #[serde(deserialize_with = "tls_addrs")]
+    pub proxy_tls_listen: Vec<SocketAddr>,
+    /// HTTPS für fremde Namen unverändert hierhin (`NRZDNS_TLS_FALLBACK`, z. B.
+    /// `host.docker.internal:443` = umbrelOS).
+    pub tls_fallback: Option<String>,
+    /// ACME-Server statt Let's Encrypt (`NRZDNS_ACME_DIRECTORY`, für Tests).
+    pub acme_directory: Option<String>,
+    /// Eigene Stammzertifizierungsstelle für den ACME-Server (PEM-Datei, für Tests).
+    pub acme_root: Option<PathBuf>,
+    /// Adresse der Cloudflare-API (`NRZDNS_CLOUDFLARE_API`).
+    pub cloudflare_api: String,
+    /// Vor der Prüfung warten, bis Cloudflares Nameserver den TXT-Eintrag ausliefern.
+    pub acme_dns_check: bool,
     /// Neue Benutzer dürfen sich selbst registrieren, solange der Admin nichts anderes
     /// einstellt (das erste Konto immer).
     pub registration_open: bool,
@@ -54,6 +70,12 @@ impl Default for Config {
             proxy_listen: vec![SocketAddr::from(([0, 0, 0, 0], 80))],
             host_gateway: None,
             proxy_fallback: None,
+            proxy_tls_listen: vec![SocketAddr::from(([0, 0, 0, 0], 443))],
+            tls_fallback: None,
+            acme_directory: None,
+            acme_root: None,
+            cloudflare_api: "https://api.cloudflare.com/client/v4".into(),
+            acme_dns_check: true,
             registration_open: false,
             cookie_secure: false,
             background: true,
@@ -103,6 +125,10 @@ fn listen_addrs<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SocketAddr>, D::E
 
 fn proxy_addrs<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SocketAddr>, D::Error> {
     addrs(d, "proxy_listen", 80)
+}
+
+fn tls_addrs<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SocketAddr>, D::Error> {
+    addrs(d, "proxy_tls_listen", 443)
 }
 
 /// Adressen als Liste oder als Zeichenkette mit Kommas (so kommen sie aus der Umgebung).
@@ -188,6 +214,15 @@ mod tests {
             ["0.0.0.0:8480", "[::]:80"]
         );
         assert!(proxy(base().merge(("proxy_listen", ""))).is_empty());
+        let tls = |f: Figment| -> Vec<String> {
+            let c: Config = f.extract().unwrap();
+            c.proxy_tls_listen.iter().map(ToString::to_string).collect()
+        };
+        assert_eq!(tls(base()), ["0.0.0.0:443"]);
+        assert_eq!(
+            tls(base().merge(("proxy_tls_listen", "0.0.0.0:444"))),
+            ["0.0.0.0:444"]
+        );
         assert!(base()
             .merge(("dns_listen", "kein-host:53"))
             .extract::<Config>()

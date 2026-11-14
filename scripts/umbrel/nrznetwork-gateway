@@ -8,6 +8,9 @@
 #   nat/PREROUTING, DNAT tcp/80 -> <Container-IP>:81, nicht fuer lo, docker0, br-*, veth*
 #   (Container erreichen umbrelOS also weiter direkt). Alles ohne Eintrag reicht der Proxy an
 #   umbrelOS weiter (NRZDNS_PROXY_FALLBACK).
+# * Steht in data/tls-active "on" (nrzNetwork hat ein HTTPS-Zertifikat) und nimmt der
+#   HTTPS-Eingang (Container-Port 444) Verbindungen an, geht auch tcp/443 dorthin. Namen ohne
+#   eigenes Zertifikat reicht nrzNetwork unveraendert an umbrelOS (Port 443) weiter.
 # * Antwortet der Proxy zweimal nicht, steht in data/port80 "off", ist der Container weg oder
 #   endet der Waechter, wird die Kette sofort entfernt - Port 80 gehoert dann wieder umbrelOS.
 #
@@ -23,6 +26,7 @@ CHAIN="NRZNETWORK"
 OUT_CHAIN="NRZNETWORK_OUT"
 NETBIRD="${NRZ_NETBIRD:-netbird_app_1}"
 PORT=81
+TLS_PORT=444
 LOG="${DATA}/gateway.log"
 STATE="${DATA}/gateway.json"
 PIDFILE="${DATA}/gateway.pid"
@@ -86,10 +90,14 @@ netbird_ip() {
 # Port 81). Danach Selbsttest als dieser Benutzer: kommt nicht die Antwort des Proxys,
 # wird die Regel wieder entfernt.
 install_out() {
-  local uid="$1"
+  local uid="$1" tls="$2"
   iptables -w -t nat -N "${OUT_CHAIN}" 2>/dev/null || iptables -w -t nat -F "${OUT_CHAIN}" || return 1
   iptables -w -t nat -A "${OUT_CHAIN}" -p tcp --dport 80 -m addrtype --dst-type LOCAL \
     -m owner --uid-owner "${uid}" -j REDIRECT --to-ports "${PORT}" || return 1
+  if [ "${tls}" = "on" ]; then
+    iptables -w -t nat -A "${OUT_CHAIN}" -p tcp --dport 443 -m addrtype --dst-type LOCAL \
+      -m owner --uid-owner "${uid}" -j REDIRECT --to-ports "${TLS_PORT}" || return 1
+  fi
   iptables -w -t nat -C OUTPUT -j "${OUT_CHAIN}" 2>/dev/null \
     || iptables -w -t nat -I OUTPUT 1 -j "${OUT_CHAIN}" || return 1
   as_user "${uid}" "exec 3<>/dev/tcp/127.0.0.1/80 \
@@ -111,7 +119,7 @@ as_user() {
 }
 
 install_rules() {
-  local ip="$1"
+  local ip="$1" tls="$2"
   iptables -w -t nat -N "${CHAIN}" 2>/dev/null || iptables -w -t nat -F "${CHAIN}" || return 1
   local i
   for i in lo docker0 'br-+' 'veth+'; do
@@ -119,8 +127,17 @@ install_rules() {
   done
   iptables -w -t nat -A "${CHAIN}" -p tcp --dport 80 -m addrtype --dst-type LOCAL \
     -j DNAT --to-destination "${ip}:${PORT}" || return 1
+  if [ "${tls}" = "on" ]; then
+    iptables -w -t nat -A "${CHAIN}" -p tcp --dport 443 -m addrtype --dst-type LOCAL \
+      -j DNAT --to-destination "${ip}:${TLS_PORT}" || return 1
+  fi
   iptables -w -t nat -C PREROUTING -j "${CHAIN}" 2>/dev/null \
     || iptables -w -t nat -I PREROUTING 1 -j "${CHAIN}" || return 1
+}
+
+# HTTPS-Eingang nimmt Verbindungen an?
+tls_listening() {
+  timeout 2 bash -c "exec 3<>/dev/tcp/$1/${TLS_PORT}" 2>/dev/null
 }
 
 container_ip() {
@@ -203,14 +220,22 @@ while :; do
     state false "Ausgeschaltet - Port 80 gehoert umbrelOS"
   elif healthy "${cip}"; then
     missing=0; fails=0
+    tls="$({ tr -d '[:space:]' < "${DATA}/tls-active"; } 2>/dev/null || echo off)"
+    if [ "${tls}" = "on" ] && ! tls_listening "${cip}"; then
+      tls="off"
+    fi
     if [ -n "${active}" ] && ! iptables -w -t nat -C PREROUTING -j "${CHAIN}" 2>/dev/null; then
       active=""
     fi
-    if [ "${active}" != "${cip}" ]; then
-      if install_rules "${cip}"; then
-        active="${cip}"
+    if [ "${active}" != "${cip}/${tls}" ]; then
+      if install_rules "${cip}" "${tls}"; then
+        active="${cip}/${tls}"
         out_state=""
-        log "Port 80 -> ${cip}:${PORT}"
+        if [ "${tls}" = "on" ]; then
+          log "Port 80 -> ${cip}:${PORT}, Port 443 -> ${cip}:${TLS_PORT}"
+        else
+          log "Port 80 -> ${cip}:${PORT} (443 bleibt bei umbrelOS)"
+        fi
       else
         remove_rules; active=""
         log "Regeln setzen fehlgeschlagen - Port 80 bleibt bei umbrelOS"
@@ -219,9 +244,9 @@ while :; do
     # NetBird (Userspace): einmal je Aktivierung versuchen, sonst alle 5 Minuten neu
     if [ -n "${active}" ] && { [ -z "${out_state}" ] || { [ "${out_state}" = "aus" ] && [ $((tick % 60)) -eq 0 ]; }; }; then
       if nb_uid="$(netbird_uid)"; then
-        if install_out "${nb_uid}"; then
+        if install_out "${nb_uid}" "${tls}"; then
           out_state="an"
-          log "NetBird (Benutzer ${nb_uid}): Port 80 -> Proxy"
+          log "NetBird (Benutzer ${nb_uid}): Port 80$([ "${tls}" = on ] && echo ' und 443') -> Proxy"
         else
           remove_out; out_state="aus"
           log "NetBird-Weiterleitung greift nicht - NetBird-Port 80 bleibt bei umbrelOS"
@@ -231,7 +256,11 @@ while :; do
       fi
     fi
     if [ -n "${active}" ]; then
-      state true "Port 80 zeigt auf den Proxy (${cip}:${PORT})"
+      if [ "${tls}" = "on" ]; then
+        state true "Port 80 und 443 zeigen auf den Proxy (${cip})"
+      else
+        state true "Port 80 zeigt auf den Proxy (${cip}:${PORT})"
+      fi
     else
       state false "Regeln liessen sich nicht setzen"
     fi

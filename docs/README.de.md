@@ -27,6 +27,7 @@ nrzNetwork beantwortet die DNS-Anfragen deines ganzen Netzes mit einem kleinen P
 | **DNS-Client** | Diesen Server (mit Zonen, Sperren und Cache) oder jeden anderen über UDP, TCP, DoT oder DoH fragen, für jeden Eintragstyp – mit Flags, Antwort-, Authority- und Additional-Abschnitt. |
 | **MCP-Server** | **Model Context Protocol** unter `/mcp` für [nrzDashboard](#mcp-server-nrzdashboard) und andere MCP-Clients: alle Kennzahlen für eine Übersicht in einem Aufruf, Statistiken, Abfrageprotokoll, Zustand von Server und Sperren – und, wenn der Admin es erlaubt, Filter ein-/ausschalten, pausieren, Sperrlisten umschalten, Regeln anlegen, Cache leeren. |
 | **Reverse Proxy** | Namen statt IP und Port: `music.nrz.ch` → `http://100.78.107.162:8350`, `bench.nrz.ch` → `http://100.78.107.162:8550`. nrzNetwork beantwortet den Namen selbst mit der Adresse des Proxys, der eingebaute HTTP-Proxy reicht nach dem `Host`-Header weiter – mit Streaming, WebSockets und umgeschriebenen Weiterleitungen. Die Domain muss dir nicht gehören; es klappt auf allen Geräten, die nrzNetwork benutzen. Nur HTTP. |
+| **HTTPS für eigene Domains** | Echtes Let's-Encrypt-Zertifikat (z. B. `zweers.ch` + `*.zweers.ch`) über die DNS-Prüfung mit einem **Cloudflare-API-Token** – von aussen muss nichts erreichbar sein, es klappt rein im lokalen Netz. Einträge öffnen sich dann als `https://music.zweers.ch` ohne Warnung, `http://` kann auf `https://` umleiten. Erneuert sich von selbst, wenn noch ein Drittel der Laufzeit übrig ist. HTTPS für Namen ohne eigenes Zertifikat (z. B. das eigene HTTPS von umbrelOS) wird anhand des Namens (SNI) unverändert durchgereicht. |
 | **Sperrseite** | Gesperrte Domains können auf nrzNetwork selbst zeigen (Sperrmodus *Sperrseite*, die Vorgabe): `http://`-Seiten zeigen „Diese Seite wurde durch nrzNetwork gesperrt“ mit Knöpfen zum **Freischalten auf Zeit** (15 Min., 1 Std., 4 Std. – einstellbar) und einem Formular, um eine **dauerhafte Freigabe zu beantragen**; der Admin genehmigt oder lehnt unter *Ausnahmen* ab. Freischaltungen enden von selbst. |
 | **Geräte & Netzwerk-Tools** | Jedes Gerät, das nrzNetwork fragt, mit Anfragen, Anteil gesperrt und zuletzt gesehen – Geräte bekommen Namen. **Ping** (ICMP, sonst TCP), **Port-Check**, **HTTP-Check** (Status, Zeit, Weiterleitungen, Header) und **Subnetz-Rechner**. |
 | **DoH-Endpunkt** | nrzNetwork beantwortet selbst **DNS über HTTPS** (RFC 8484) unter `/dns-query`, `GET` und `POST`, abschaltbar. |
@@ -43,7 +44,7 @@ Du brauchst Docker. Das Image enthält Programm und Oberfläche.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.3.2
+  ghcr.io/nicorenezweers/nrz-dns:1.4.0
 ```
 
 Das Image ist für mehrere Architekturen gebaut (`linux/amd64`, `linux/arm64`) und erscheint mit jedem [Release](https://github.com/nicorenezweers/nrzDNS/releases). Selbst bauen:
@@ -63,7 +64,7 @@ docker build -t nrzdns .
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.3.2   # oder: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.4.0   # oder: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -97,10 +98,10 @@ Der Container läuft als Benutzer `1000` ohne zusätzliche Rechte. Docker (ab 20
 Jedes [Release](https://github.com/nicorenezweers/nrzDNS/releases) enthält das Programm für Linux (`amd64`, `arm64`) als einzelne Datei, dazu `SHA256SUMS`. Die Wurzelzertifikate für DoT, DoH und das Laden der Sperrlisten bringt es selbst mit.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.3.2/nrzdns-1.3.2-linux-amd64
-chmod +x nrzdns-1.3.2-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.3.2-linux-amd64   # Port 53 ohne root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.3.2-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.4.0/nrzdns-1.4.0-linux-amd64
+chmod +x nrzdns-1.4.0-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.4.0-linux-amd64   # Port 53 ohne root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.4.0-linux-amd64
 ```
 
 Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen lassen, z. B. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, und mit `dig @127.0.0.1 -p 5353 example.com` fragen.
@@ -108,7 +109,7 @@ Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen la
 ### Beide Architekturen
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.3.2 --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.4.0 --push .
 ```
 
 Rust wird quer-kompiliert, nicht emuliert – der arm64-Build ist auf einem x86-Rechner also schnell und umgekehrt. Nur das Programm, gzip-komprimiert je Architektur (für die Umbrel-App): `scripts/store-binaries.sh <ordner>`.
@@ -141,6 +142,8 @@ Einstellungen für den Start kommen aus Umgebungsvariablen mit dem Präfix `NRZD
 | `NRZDNS_DNS_LISTEN` | `0.0.0.0:53` | DNS-Adressen (jeweils UDP und TCP), durch Kommas getrennt, z. B. `0.0.0.0:53,[::]:53` |
 | `NRZDNS_HOST_GATEWAY` | – | Name, unter dem der Container das Gerät selbst erreicht (`host.docker.internal`); Ziele auf einer Adresse dieses Geräts verbindet der Proxy darüber |
 | `NRZDNS_PROXY_FALLBACK` | – | Wohin Namen ohne Eintrag, IP-Adressen und `.local`-Namen gehen, z. B. `http://host.docker.internal:80` (umbrelOS) |
+| `NRZDNS_PROXY_TLS_LISTEN` | `0.0.0.0:443` | HTTPS-Eingang des Proxys (leer = keiner) |
+| `NRZDNS_TLS_FALLBACK` | – | Wohin HTTPS für Namen ohne eigenes Zertifikat unverändert geht, z. B. `host.docker.internal:443` (umbrelOS) |
 | `NRZDNS_PROXY_LISTEN` | `0.0.0.0:80` | Adressen des Reverse Proxys (HTTP), durch Kommas getrennt; leer = aus. Auf einem anderen Port brauchen die Namen ihn: `http://music.nrz.ch:8480/` |
 | `NRZDNS_CONFIG` | `Rocket.toml` (`/app/Rocket.toml` im Image) | Pfad der Konfigurationsdatei |
 | `NRZDNS_COOKIE_SECURE` | `false` | Auf `true` setzen, wenn die Oberfläche über HTTPS läuft |

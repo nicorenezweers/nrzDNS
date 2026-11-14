@@ -77,6 +77,10 @@
 //! | `POST /requests/<id>/approve` | → [`AllowRequest`] (Domain kommt in die Ausnahmen) | Admin |
 //! | `POST /requests/<id>/reject` | → [`AllowRequest`] | Admin |
 //! | `DELETE /requests/<id>` | → `204` | Admin |
+//! | `GET /tls` | → [`TlsStatus`] (HTTPS: Einstellungen ohne Token, Zertifikat, letzter Versuch) | angemeldet |
+//! | `PUT /tls` | [`TlsSettingsInput`] → [`TlsStatus`] | Admin |
+//! | `POST /tls/issue` | → [`TlsStatus`] (Zertifikat jetzt holen, läuft im Hintergrund) | Admin |
+//! | `DELETE /tls/certificate` | → `204` (Zertifikat entfernen) | Admin |
 //! | `POST /tools/ping` | [`PingInput`] → [`PingResult`] (ICMP, sonst TCP) | angemeldet |
 //! | `POST /tools/ports` | [`PortsInput`] → [`PortsResult`] | angemeldet |
 //! | `POST /tools/http` | [`HttpCheckInput`] → [`HttpCheckResult`] | angemeldet |
@@ -93,7 +97,9 @@
 
 use serde::{Deserialize, Serialize};
 
+mod tls;
 mod tools;
+pub use tls::*;
 pub use tools::*;
 
 // ------------------------------------------------------------------ Fehler
@@ -1472,6 +1478,8 @@ pub struct ProxyStatus {
     pub device_addresses: Vec<String>,
     /// Port-80-Weiterleitung (nur auf Umbrel, sonst `None`).
     pub gateway: Option<GatewayStatus>,
+    /// Namen mit HTTPS-Zertifikat (z. B. `*.zweers.ch`), leer = kein HTTPS.
+    pub https_names: Vec<String>,
 }
 
 #[cfg(test)]

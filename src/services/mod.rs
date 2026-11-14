@@ -8,6 +8,7 @@ pub mod proxy;
 pub mod querylog;
 pub mod settings;
 pub mod sync;
+pub mod tls;
 pub mod tools;
 pub mod unlocks;
 pub mod users;

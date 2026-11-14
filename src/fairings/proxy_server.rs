@@ -33,7 +33,24 @@ impl Fairing for ProxyServer {
             rocket.state::<SqlitePool>().cloned(),
             rocket.state::<Engine>().cloned(),
         ) {
-            tokio::spawn(housekeeping(pool, engine, state.clone(), rocket.shutdown()));
+            tokio::spawn(housekeeping(
+                pool.clone(),
+                engine.clone(),
+                state.clone(),
+                rocket.shutdown(),
+            ));
+            tokio::spawn(renew_certificates(
+                pool,
+                engine,
+                state.clone(),
+                config.clone(),
+                rocket.shutdown(),
+            ));
+        }
+        if !config.proxy_tls_listen.is_empty() {
+            state
+                .serve_tls(&config.proxy_tls_listen, rocket.shutdown())
+                .await;
         }
         if config.proxy_listen.is_empty() {
             tracing::info!("Kein Reverse Proxy (proxy_listen ist leer)");
@@ -79,5 +96,24 @@ async fn housekeeping(
             }
             last = now;
         }
+    }
+}
+
+/// HTTPS-Zertifikat: eine Minute nach dem Start, danach stündlich prüfen und bei Bedarf erneuern.
+async fn renew_certificates(
+    pool: SqlitePool,
+    engine: Engine,
+    state: ProxyState,
+    config: Config,
+    mut shutdown: rocket::Shutdown,
+) {
+    let mut wait = Duration::from_secs(60);
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(wait) => {}
+            _ = &mut shutdown => break,
+        }
+        crate::services::tls::maybe_renew(&pool, &engine, &state, &config).await;
+        wait = Duration::from_secs(3600);
     }
 }
