@@ -518,6 +518,7 @@ fn blocked_answer(engine: &Engine, q: &QueryCtx, s: &DnsSettings, matched: &str)
                 (RecordType::A, Some(IpAddr::V4(a))) => Some(RData::A(rdata::A(a))),
                 (RecordType::A, _) => Some(RData::A(rdata::A(Ipv4Addr::UNSPECIFIED))),
                 (RecordType::AAAA, Some(IpAddr::V6(a))) => Some(RData::AAAA(rdata::AAAA(a))),
+                (RecordType::AAAA, _) => Some(RData::AAAA(rdata::AAAA(Ipv6Addr::UNSPECIFIED))),
                 _ => None,
             };
             match rdata {

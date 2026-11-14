@@ -1,6 +1,6 @@
 [package]
 name = "nrzdns"
-version = "1.3.0"
+version = "1.3.2"
 edition = "2021"
 description = "nrzNetwork – selbst gehosteter DNS-Server wie Technitium, in Rust (Rocket, SQLite, Dioxus)"
 license = "AGPL-3.0-or-later"

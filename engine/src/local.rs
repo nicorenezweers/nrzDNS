@@ -34,7 +34,10 @@ fn is_private(ip: IpAddr) -> bool {
     }
 }
 
-/// Wie gut `addr` zu `client` passt (höher = besser).
+/// Wie gut `addr` zu `client` passt (höher = besser). Ein Client im selben /24 (LAN) bekommt
+/// die LAN-Adresse, ein VPN-Client (100.64.0.0/10) die VPN-Adresse. Ein privater Client, der in
+/// keinem Netz des Geräts liegt, ist meist das Gerät selbst – etwa ein VPN im Userspace
+/// (NetBird), das Anfragen über die Docker-Bridge weiterreicht: er bekommt die VPN-Adresse.
 fn score(client: Option<IpAddr>, addr: IpAddr) -> u8 {
     let Some(client) = client else {
         return u8::from(is_private(addr));
@@ -42,13 +45,8 @@ fn score(client: Option<IpAddr>, addr: IpAddr) -> u8 {
     match (client, addr) {
         (IpAddr::V4(c), IpAddr::V4(a)) if c.octets()[..3] == a.octets()[..3] => 5,
         (c, a) if is_cgnat(c) && is_cgnat(a) => 5,
-        (IpAddr::V4(c), IpAddr::V4(a))
-            if c.octets()[..2] == a.octets()[..2] && is_private(addr) =>
-        {
-            4
-        }
-        (c, a) if is_private(c) && is_private(a) => 3,
-        (c, a) if c.is_loopback() && is_private(a) => 2,
+        (c, a) if (is_private(c) || c.is_loopback()) && is_cgnat(a) => 3,
+        (c, a) if is_private(c) && is_private(a) => 2,
         (_, a) if is_private(a) => 1,
         _ => 0,
     }
@@ -84,8 +82,13 @@ mod tests {
             pick(&c, Some(ip("100.78.1.2")), true),
             Some(ip("100.78.107.162"))
         );
+        // Über die Docker-Bridge (VPN im Userspace) → VPN-Adresse
         assert_eq!(
             pick(&c, Some(ip("172.17.0.3")), true),
+            Some(ip("100.78.107.162"))
+        );
+        assert_eq!(
+            pick(&[ip("192.168.0.198")], Some(ip("10.21.0.1")), true),
             Some(ip("192.168.0.198"))
         );
         assert_eq!(pick(&c, None, true), Some(ip("192.168.0.198")));

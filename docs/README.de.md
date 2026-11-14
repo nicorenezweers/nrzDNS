@@ -43,7 +43,7 @@ Du brauchst Docker. Das Image enthält Programm und Oberfläche.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.3.0
+  ghcr.io/nicorenezweers/nrz-dns:1.3.2
 ```
 
 Das Image ist für mehrere Architekturen gebaut (`linux/amd64`, `linux/arm64`) und erscheint mit jedem [Release](https://github.com/nicorenezweers/nrzDNS/releases). Selbst bauen:
@@ -63,7 +63,7 @@ docker build -t nrzdns .
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.3.0   # oder: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.3.2   # oder: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -97,10 +97,10 @@ Der Container läuft als Benutzer `1000` ohne zusätzliche Rechte. Docker (ab 20
 Jedes [Release](https://github.com/nicorenezweers/nrzDNS/releases) enthält das Programm für Linux (`amd64`, `arm64`) als einzelne Datei, dazu `SHA256SUMS`. Die Wurzelzertifikate für DoT, DoH und das Laden der Sperrlisten bringt es selbst mit.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.3.0/nrzdns-1.3.0-linux-amd64
-chmod +x nrzdns-1.3.0-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.3.0-linux-amd64   # Port 53 ohne root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.3.0-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.3.2/nrzdns-1.3.2-linux-amd64
+chmod +x nrzdns-1.3.2-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.3.2-linux-amd64   # Port 53 ohne root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.3.2-linux-amd64
 ```
 
 Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen lassen, z. B. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, und mit `dig @127.0.0.1 -p 5353 example.com` fragen.
@@ -108,7 +108,7 @@ Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen la
 ### Beide Architekturen
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.3.0 --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.3.2 --push .
 ```
 
 Rust wird quer-kompiliert, nicht emuliert – der arm64-Build ist auf einem x86-Rechner also schnell und umgekehrt. Nur das Programm, gzip-komprimiert je Architektur (für die Umbrel-App): `scripts/store-binaries.sh <ordner>`.

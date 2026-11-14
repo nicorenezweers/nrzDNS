@@ -76,8 +76,10 @@ netbird_uid() {
 }
 
 netbird_ip() {
+  # Nur die eigene Adresse: sie steht mit Praefix da ("100.78.107.162/16"), die der anderen
+  # Geraete (peers) ohne.
   docker exec "${NETBIRD}" netbird status --json 2>/dev/null \
-    | grep -o '"netbirdIp": *"[0-9.]*' | grep -o '[0-9.]*$'
+    | grep -oE '"netbirdIp": *"[0-9.]+/[0-9]+"' | grep -oE '[0-9]+(\.[0-9]+){3}' | head -n 1
 }
 
 # Lokale Verbindungen von NetBird auf Port 80 an den Proxy (ueber den veroeffentlichten
@@ -133,7 +135,7 @@ healthy() {
     && grep -q nrznetwork-ok <&3" 2>/dev/null
 }
 
-IFACE_SKIP='^(docker|br-|veth|lo|virbr|vnet|tap|cni|flannel|kube|lxc|lxd)'
+IFACE_SKIP='^(docker|br-|veth|lo|virbr|vnet|tap|cni|flannel|kube|lxc|lxd|umbrel-vm)'
 
 host_addresses() {
   {

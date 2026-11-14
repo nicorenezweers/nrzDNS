@@ -1523,7 +1523,7 @@ mod tests {
     fn settings_roundtrip() {
         let s = DnsSettings::default();
         let j = serde_json::to_string(&s).unwrap();
-        assert!(j.contains("\"blockMode\":\"nullAddress\""));
+        assert!(j.contains("\"blockMode\":\"blockPage\""));
         assert_eq!(serde_json::from_str::<DnsSettings>(&j).unwrap(), s);
         // Fehlende Felder bekommen Vorgaben (ältere gespeicherte Einstellungen)
         let partial: DnsSettings = serde_json::from_str(r#"{"cacheEnabled":false}"#).unwrap();

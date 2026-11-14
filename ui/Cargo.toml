@@ -1,6 +1,6 @@
 [package]
 name = "nrzdns-ui"
-version = "1.3.0"
+version = "1.3.2"
 edition = "2024"
 description = "Oberfläche von nrzDNS – Dioxus 0.7 (WebAssembly) mit Komponenten von rust-ui"
 license = "MIT"
