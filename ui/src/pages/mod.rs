@@ -7,6 +7,7 @@ pub mod devices;
 pub mod domains;
 pub mod layout;
 pub mod logs;
+pub mod monitor;
 pub mod netbird;
 pub mod not_found;
 pub mod proxy;

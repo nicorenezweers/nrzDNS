@@ -4,7 +4,7 @@
 # systemd-resolved mit DNSStubListener auf 0.0.0.0:53).
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.6.0
+    image: ghcr.io/nicorenezweers/nrz-dns:1.7.0
     # Selbst bauen statt das fertige Image zu holen:
     # build: .
     container_name: nrzdns
@@ -27,6 +27,8 @@ services:
       # NRZDNS_PROXY_LISTEN: "0.0.0.0:80"
       # HTTPS-Eingang (leer = aus):
       # NRZDNS_PROXY_TLS_LISTEN: "0.0.0.0:443"
+      # Zeitzone für die Update-Uhrzeit der Komponenten (Cloudflare Tunnel, NetBird):
+      # TZ: Europe/Zurich
     volumes:
       # nrzdns.db: Konten, Einstellungen, Zonen, Sperrlisten, Abfrageprotokoll – alles in einer Datei
       - nrzdns-data:/data

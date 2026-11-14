@@ -1,10 +1,12 @@
 //! REST-API unter `/api/v1`. Typen der Körper und Antworten: Crate `nrzdns-types` (dort steht
 //! auch die ganze Tabelle der Endpunkte). Lesen darf jeder Angemeldete, ändern nur Admins.
 
+mod access;
 mod admin;
 mod auth;
 mod blocking;
 mod cache;
+mod components;
 mod integrations;
 mod logs;
 mod mcp;
@@ -35,6 +37,8 @@ pub fn routes() -> Vec<Route> {
     r.extend(proxy::routes());
     r.extend(requests::routes());
     r.extend(settings::routes());
+    r.extend(components::routes());
+    r.extend(access::routes());
     r.extend(spy::routes());
     r.extend(integrations::routes());
     r.extend(tls::routes());

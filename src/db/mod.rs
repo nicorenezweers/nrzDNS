@@ -11,6 +11,14 @@ pub fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
+/// Jetzt in Unix-Millisekunden.
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
+}
+
 /// Öffnet (bzw. erstellt) die Datenbank.
 pub async fn open(config: &Config) -> Result<SqlitePool, AppError> {
     std::fs::create_dir_all(&config.data_dir)?;

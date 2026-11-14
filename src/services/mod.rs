@@ -1,6 +1,8 @@
 //! Fachlogik ohne HTTP: die Routen rufen nur diese Funktionen auf.
 
+pub mod access;
 pub mod blocking;
+pub mod components;
 pub mod dashboard;
 pub mod domains;
 pub mod integrations;

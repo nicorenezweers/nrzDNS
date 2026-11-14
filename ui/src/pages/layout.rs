@@ -127,6 +127,7 @@ fn Sidebar() -> Element {
             NavItem { to: Route::Allowed {}, label: tr("Ausnahmen"), active: matches!(route, Route::Allowed {}), icon: rsx! { icons::ShieldCheck {} } }
             NavItem { to: Route::logs(), label: tr("Abfragen"), active: matches!(route, Route::Logs { .. }), icon: rsx! { icons::ScrollText {} } }
             NavItem { to: Route::Proxy {}, label: tr("Reverse Proxy"), active: matches!(route, Route::Proxy {}), icon: rsx! { icons::Waypoints {} } }
+            NavItem { to: Route::Monitor {}, label: tr("Zugriffe"), active: matches!(route, Route::Monitor {}), icon: rsx! { icons::Activity {} } }
             NavItem { to: Route::Cache {}, label: tr("Cache"), active: matches!(route, Route::Cache {}), icon: rsx! { icons::Database {} } }
             NavItem { to: Route::Resolve { name: None, qtype: None }, label: tr("DNS-Client"), active: matches!(route, Route::Resolve { .. }), icon: rsx! { icons::Terminal {} } }
             NavItem { to: Route::Devices {}, label: tr("Geräte"), active: matches!(route, Route::Devices {}), icon: rsx! { icons::MonitorSmartphone {} } }

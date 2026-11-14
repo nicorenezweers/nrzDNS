@@ -86,6 +86,7 @@ fn Main(url: String) -> Element {
                         ("access".to_string(), tr("Zugriff")),
                         ("networks".to_string(), tr("Netzwerke")),
                         ("dns".to_string(), tr("DNS")),
+                        ("services".to_string(), tr("Freigaben")),
                         ("keys".to_string(), tr("Setup-Keys")),
                         ("users".to_string(), tr("Benutzer")),
                     ],
@@ -98,6 +99,7 @@ fn Main(url: String) -> Element {
                 "access" => rsx! { AccessTab { groups: groups.clone(), version } },
                 "networks" => rsx! { NetworksTab { groups: groups.clone(), peers: peers.clone(), version } },
                 "dns" => rsx! { DnsTab { groups: groups.clone(), version } },
+                "services" => rsx! { ServicesTab { groups: groups.clone(), peers: peers.clone(), version } },
                 "keys" => rsx! { KeysTab { groups: groups.clone(), url: url.clone(), version } },
                 "users" => rsx! { UsersTab { groups: groups.clone(), version } },
                 _ => rsx! { PeersTab { peers_v: peers_v.clone(), groups_v: groups_v.clone(), loading: peers_res.read().is_none(), version } },
@@ -1453,6 +1455,214 @@ fn UsersTab(groups: Groups, version: Signal<u64>) -> Element {
                 div { class: "flex justify-end gap-2",
                     button { class: btn(BTN_OUTLINE), r#type: "button", onclick: move |_| open.set(false), {tr("Abbrechen")} }
                     button { class: btn(BTN_PRIMARY), r#type: "submit", if is_new { {tr("Einladen")} } else { {tr("Speichern")} } }
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ Freigaben (NetBird Reverse Proxy)
+
+/// Dienst für PUT aufbereiten (Felder, die nur gelesen werden, entfernen).
+fn service_body(v: &Value, enabled: bool) -> Value {
+    let mut b = v.clone();
+    if let Some(o) = b.as_object_mut() {
+        for k in [
+            "id",
+            "meta",
+            "port_auto_assigned",
+            "proxy_cluster",
+            "terminated",
+        ] {
+            o.remove(k);
+        }
+        o.insert("enabled".into(), json!(enabled));
+    }
+    b
+}
+
+#[component]
+fn ServicesTab(groups: Groups, peers: Groups, version: Signal<u64>) -> Element {
+    let admin = state::is_admin();
+    let res = use_resource(move || async move {
+        let _ = version();
+        api::get::<Value>("/netbird/reverse-proxies/services").await
+    });
+    let domains =
+        use_resource(|| async { api::get::<Value>("/netbird/reverse-proxies/domains").await });
+    let mut open = use_signal(|| false);
+    let mut sub = use_signal(String::new);
+    let mut base = use_signal(String::new);
+    let mut peer = use_signal(String::new);
+    let mut port = use_signal(|| 80i64);
+    let mut proto = use_signal(|| "http".to_string());
+    let mut private = use_signal(|| false);
+    let mut sel = use_signal(Vec::<String>::new);
+    let mut password = use_signal(String::new);
+    let doms: Vec<(String, bool)> = match &*domains.read() {
+        Some(Ok(v)) => list(v)
+            .iter()
+            .map(|d| (s(d, "domain"), b(d, "require_subdomain")))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let doms2 = doms.clone();
+    let doms3 = doms.clone();
+    let create = move |e: FormEvent| {
+        e.prevent_default();
+        let need_sub =
+            doms2.iter().find(|d| d.0 == base()).is_some_and(|d| d.1) || base().is_empty();
+        let domain = if need_sub || !sub().trim().is_empty() {
+            format!("{}.{}", sub().trim(), base())
+        } else {
+            base()
+        };
+        spawn(async move {
+            let mut body = json!({
+                "name": domain,
+                "domain": domain,
+                "mode": "http",
+                "enabled": true,
+                "pass_host_header": false,
+                "rewrite_redirects": true,
+                "private": private(),
+                "targets": [{ "target_id": peer(), "target_type": "peer", "path": "/", "access_action": "inherit", "protocol": proto(), "port": port(), "enabled": true }],
+            });
+            if private() {
+                body["access_groups"] = json!(sel());
+            }
+            if !password().trim().is_empty() {
+                body["auth"] =
+                    json!({ "password_auth": { "enabled": true, "password": password().trim() } });
+            }
+            if run(
+                "POST",
+                "/netbird/reverse-proxies/services".into(),
+                body,
+                tr("Freigabe angelegt."),
+                version,
+            )
+            .await
+            {
+                open.set(false);
+            }
+        });
+    };
+    let gs = groups.clone();
+    rsx! {
+        Section { title: tr("Freigaben (NetBird Reverse Proxy)"), description: tr("Dienste im NetBird-Netz unter einer Adresse von NetBird im Internet erreichbar machen – auf Wunsch nur für NetBird-Benutzer, mit Passwort oder Zugriffsregeln. Ergänzt den Cloudflare Tunnel."),
+            actions: rsx! {
+                if admin {
+                    button { class: btn_sm(BTN_PRIMARY), onclick: move |_| { sub.set(String::new()); base.set(doms3.first().map(|d| d.0.clone()).unwrap_or_default()); peer.set(String::new()); port.set(80); proto.set("http".into()); private.set(false); sel.set(Vec::new()); password.set(String::new()); open.set(true); },
+                        icons::Plus {} {tr("Freigabe")}
+                    }
+                }
+            },
+            match &*res.read() {
+                None => rsx! { Loading {} },
+                Some(Err(e)) => rsx! { Callout { text: trf("NetBird Reverse Proxy nicht verfügbar: {0}", &[&e.message]) } },
+                Some(Ok(v)) if list(v).is_empty() => rsx! { p { class: "text-sm text-muted-foreground", {tr("Noch keine Freigaben.")} } },
+                Some(Ok(v)) => rsx! {
+                    TableWrapper { Table {
+                        TableHeader { tr {
+                            TableHead { class: "w-14", {tr("An")} }
+                            TableHead { {tr("Adresse")} }
+                            TableHead { class: "hidden md:table-cell", {tr("Ziel")} }
+                            TableHead { {tr("Zugang")} }
+                            if admin { TableHead { class: "w-12" } }
+                        } }
+                        TableBody {
+                            for svc in list(v) {
+                                {
+                                    let id = s(&svc, "id");
+                                    let domain = s(&svc, "domain");
+                                    let st = svc.clone();
+                                    let targets = list(&svc["targets"]).iter().map(|t| {
+                                        let who = name_of(&peers, &s(t, "target_id"));
+                                        let host = s(t, "host");
+                                        format!("{}{}:{}", if host.is_empty() { who } else { host }, if s(t, "path").is_empty() || s(t, "path") == "/" { String::new() } else { s(t, "path") }, n(t, "port"))
+                                    }).collect::<Vec<_>>().join(", ");
+                                    let auth = &svc["auth"];
+                                    let mut access: Vec<String> = Vec::new();
+                                    if b(&svc, "private") { access.push(tr("nur NetBird")); }
+                                    if b(&auth["password_auth"], "enabled") { access.push(tr("Passwort")); }
+                                    if b(&auth["pin_auth"], "enabled") { access.push("PIN".into()); }
+                                    if b(&auth["bearer_auth"], "enabled") { access.push(tr("Anmeldung")); }
+                                    if access.is_empty() { access.push(tr("öffentlich")); }
+                                    rsx! {
+                                        TableRow { key: "{id}",
+                                            TableCell {
+                                                Toggle { checked: b(&svc, "enabled"), disabled: !admin, label: "",
+                                                    onchange: move |on: bool| {
+                                                        let svc = st.clone();
+                                                        spawn(async move {
+                                                            run("PUT", format!("/netbird/reverse-proxies/services/{}", s(&svc, "id")), service_body(&svc, on), String::new(), version).await;
+                                                        });
+                                                    },
+                                                }
+                                            }
+                                            TableCell { class: "font-mono text-[13px] break-all",
+                                                a { class: "hover:underline", href: "https://{domain}/", target: "_blank", rel: "noopener", "{domain}" }
+                                                p { class: "font-sans text-xs text-muted-foreground", {s(&svc["meta"], "status")} }
+                                            }
+                                            TableCell { class: "hidden font-mono text-xs text-muted-foreground md:table-cell", "{targets}" }
+                                            TableCell { div { class: "flex flex-wrap gap-1", for a in access { Pill { key: "{a}", "{a}" } } } }
+                                            if admin {
+                                                TableCell { class: "px-2 text-right",
+                                                    button { class: icon_btn("hover:text-destructive"), title: tr("Löschen"),
+                                                        onclick: move |_| {
+                                                            let (id, domain) = (id.clone(), domain.clone());
+                                                            spawn(async move {
+                                                                if ask_delete(domain, tr("Die Adresse ist danach nicht mehr erreichbar.")).await {
+                                                                    run("DELETE", format!("/netbird/reverse-proxies/services/{id}"), Value::Null, tr("Gelöscht."), version).await;
+                                                                }
+                                                            });
+                                                        },
+                                                        icons::Trash2 {}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } }
+                },
+            }
+        }
+        Modal { open, title: tr("Neue Freigabe"),
+            form { class: "grid grid-cols-1 gap-4", onsubmit: create,
+                div { class: "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1.4fr)] items-end gap-2",
+                    Field { label: tr("Name"), input { class: "{INPUT} font-mono text-[13px]", placeholder: "music", value: "{sub}", oninput: move |e| sub.set(e.value()) } }
+                    span { class: "pb-2 text-muted-foreground", "." }
+                    Field { label: tr("Domain"),
+                        select { class: SELECT, required: true, value: "{base}", onchange: move |e| base.set(e.value()),
+                            for (d, _) in doms.clone() { option { key: "{d}", value: "{d}", "{d}" } }
+                        }
+                    }
+                }
+                div { class: "grid grid-cols-[minmax(0,1fr)_6rem_6rem] gap-2",
+                    Field { label: tr("Gerät"),
+                        select { class: SELECT, required: true, value: "{peer}", onchange: move |e| peer.set(e.value()),
+                            option { value: "", {tr("Gerät wählen …")} }
+                            for (pid, pname) in peers.clone() { option { key: "{pid}", value: "{pid}", "{pname}" } }
+                        }
+                    }
+                    Field { label: tr("Port"), input { class: INPUT, r#type: "number", min: 1, max: 65535, value: "{port}", oninput: move |e| port.set(e.value().parse().unwrap_or(80)) } }
+                    Field { label: tr("Protokoll"),
+                        select { class: SELECT, value: "{proto}", onchange: move |e| proto.set(e.value()),
+                            option { value: "http", "HTTP" }
+                            option { value: "https", "HTTPS" }
+                        }
+                    }
+                }
+                Toggle { checked: private(), onchange: move |v| private.set(v), label: tr("Nur für NetBird-Benutzer"), hint: tr("Zugriff nur nach Anmeldung bei NetBird, optional auf Gruppen beschränkt.") }
+                if private() { Field { label: tr("Gruppen"), GroupPicker { groups: gs.clone(), selected: sel } } }
+                Field { label: tr("Passwort (optional)"), input { class: INPUT, r#type: "password", autocomplete: "new-password", value: "{password}", oninput: move |e| password.set(e.value()) } }
+                div { class: "flex justify-end gap-2",
+                    button { class: btn(BTN_OUTLINE), r#type: "button", onclick: move |_| open.set(false), {tr("Abbrechen")} }
+                    button { class: btn(BTN_PRIMARY), r#type: "submit", disabled: peer().is_empty() || base().is_empty(), {tr("Anlegen")} }
                 }
             }
         }

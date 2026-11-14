@@ -85,6 +85,15 @@
 //! | `PUT /integrations` | [`IntegrationsInput`] → [`IntegrationsStatus`] | Admin |
 //! | `GET\|POST\|PUT\|PATCH\|DELETE /cloudflare/<pfad>` | Cloudflare-API (`/client/v4/<pfad>`): Zonen lesen, DNS-Einträge verwalten; Antwort unverändert | lesen: angemeldet, ändern: Admin |
 //! | `GET\|POST\|PUT\|DELETE /netbird/<pfad>` | NetBird-API (`/api/<pfad>`): Geräte, Gruppen, Policies, Netzwerke, DNS, Setup-Keys, Benutzer; Antwort unverändert | lesen: angemeldet, ändern: Admin |
+//! | `GET /access/stats?period=24h\|7d\|30d&host=` | → [`AccessStats`] (Zugriffe auf die Websites) | angemeldet |
+//! | `GET /access/log?host=&limit=&before=` | → `Vec<`[`AccessEntry`]`>` (neueste zuerst) | angemeldet |
+//! | `DELETE /access/log` | → `204` (Protokoll leeren) | Admin |
+//! | `PUT /proxy/hosts/<id>/public` | [`PublicInput`] → [`ProxyHost`] (über Cloudflare Tunnel freigeben) | Admin |
+//! | `GET /components` | → [`ComponentsStatus`] (Cloudflare Tunnel, NetBird) | angemeldet |
+//! | `PUT /components` | [`ComponentsInput`] → [`ComponentsStatus`] | Admin |
+//! | `POST /components/check` | → [`ComponentsStatus`] (jetzt nach Updates suchen und einspielen) | Admin |
+//! | `POST /components/tunnel` | → [`ComponentsStatus`] (neuen Tunnel über die Cloudflare-API anlegen) | Admin |
+//! | `POST /components/netbird-key` | → [`ComponentsStatus`] (Setup-Key über die NetBird-API erzeugen) | Admin |
 //! | `GET /spy` | → [`SpyStatus`] (laufender Scan, eigene Domains, letzte Berichte) | angemeldet |
 //! | `POST /spy/scan` | [`SpyScanInput`] → [`SpyStatus`] (Scan im Hintergrund; aktiv nur für eigene Domains) | Admin |
 //! | `DELETE /spy/reports/<domain>` | → `204` | Admin |
@@ -104,9 +113,11 @@
 
 use serde::{Deserialize, Serialize};
 
+mod access;
 mod spy;
 mod tls;
 mod tools;
+pub use access::*;
 pub use spy::*;
 pub use tls::*;
 pub use tools::*;
@@ -1370,6 +1381,9 @@ pub struct ProxyHost {
     pub dns_address: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Über den Cloudflare Tunnel öffentlich erreichbar.
+    #[serde(default)]
+    pub public: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1411,6 +1425,8 @@ pub struct ProxySettings {
     /// Umbrel: Port 80 des Geräts an den Proxy geben (Namen ohne Port); alles Unbekannte geht
     /// weiter an umbrelOS.
     pub port80: bool,
+    /// Zugriffe so viele Tage aufheben (0 = nicht protokollieren).
+    pub access_log_days: u32,
 }
 
 impl Default for ProxySettings {
@@ -1421,6 +1437,7 @@ impl Default for ProxySettings {
             unlock_minutes: vec![15, 60, 240],
             allow_requests: true,
             port80: true,
+            access_log_days: 30,
         }
     }
 }

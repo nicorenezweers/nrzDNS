@@ -1,6 +1,6 @@
 [package]
 name = "nrzdns"
-version = "1.6.0"
+version = "1.7.0"
 edition = "2021"
 description = "nrzNetwork – selbst gehosteter DNS-Server wie Technitium, in Rust (Rocket, SQLite, Dioxus)"
 license = "AGPL-3.0-or-later"
@@ -48,9 +48,16 @@ hyper-rustls = { version = "0.27", default-features = false, features = ["http1"
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "http2", "tokio"] }
 bytes = "1"
 webpki-roots = "1"
+# Komponenten (Cloudflare Tunnel, NetBird): Downloads entpacken, Stammzertifikate als PEM für
+# die Go-Programme, Update-Uhrzeit in der Zeitzone des Geräts
+flate2 = "1"
+ring = "0.17"
+tar = "0.4"
+webpki-root-certs = "1"
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
 
 # Laufzeit & Hilfen
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "time", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "time", "net", "process", "io-util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }

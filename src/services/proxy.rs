@@ -42,7 +42,7 @@ pub fn gateway_status(data_dir: &Path) -> Option<GatewayStatus> {
     Some(s)
 }
 
-type Row = (i64, String, String, bool, String, i64, i64);
+type Row = (i64, String, String, bool, String, i64, i64, bool);
 
 pub async fn settings(pool: &SqlitePool) -> AppResult<ProxySettings> {
     Ok(settings::get(pool, SETTINGS).await?.unwrap_or_default())
@@ -94,6 +94,7 @@ pub async fn save_settings(pool: &SqlitePool, input: &ProxySettings) -> AppResul
         unlock_minutes: minutes,
         allow_requests: input.allow_requests,
         port80: input.port80,
+        access_log_days: input.access_log_days.min(365),
     };
     settings::set(pool, SETTINGS, &s).await?;
     Ok(s)
@@ -176,7 +177,7 @@ pub fn target(input: &str) -> AppResult<(String, Target)> {
 }
 
 fn to_host(r: Row, device: &[IpAddr]) -> ProxyHost {
-    let (id, host, target, enabled, comment, created_at, updated_at) = r;
+    let (id, host, target, enabled, comment, created_at, updated_at, public) = r;
     let dns_address = if device.is_empty() {
         target_ip(&target)
             .map(|ip| ip.to_string())
@@ -197,22 +198,37 @@ fn to_host(r: Row, device: &[IpAddr]) -> ProxyHost {
         dns_address,
         created_at,
         updated_at,
+        public,
     }
 }
 
 /// Alle Einträge, alphabetisch (`device` = Adressen dieses Geräts für die Anzeige).
 pub async fn list(pool: &SqlitePool, device: &[IpAddr]) -> AppResult<Vec<ProxyHost>> {
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT id, host, target, enabled, comment, created_at, updated_at FROM proxy_hosts ORDER BY host",
+        "SELECT id, host, target, enabled, comment, created_at, updated_at, public FROM proxy_hosts ORDER BY host",
     )
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(|r| to_host(r, device)).collect())
 }
 
-async fn get(pool: &SqlitePool, id: i64) -> AppResult<ProxyHost> {
+/// Über den Cloudflare Tunnel öffentlich machen (oder nicht).
+pub async fn set_public(pool: &SqlitePool, id: i64, public: bool) -> AppResult<ProxyHost> {
+    let done = sqlx::query("UPDATE proxy_hosts SET public = ?, updated_at = ? WHERE id = ?")
+        .bind(public)
+        .bind(crate::db::now())
+        .bind(id)
+        .execute(pool)
+        .await?;
+    if done.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    get(pool, id).await
+}
+
+pub async fn get(pool: &SqlitePool, id: i64) -> AppResult<ProxyHost> {
     let row: Option<Row> = sqlx::query_as(
-        "SELECT id, host, target, enabled, comment, created_at, updated_at FROM proxy_hosts WHERE id = ?",
+        "SELECT id, host, target, enabled, comment, created_at, updated_at, public FROM proxy_hosts WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -404,6 +420,7 @@ mod tests {
             dns_address: String::new(),
             created_at: 0,
             updated_at: 0,
+            public: false,
         };
         let m = local_hosts(&[h("http://100.78.107.162:8350")], &[]);
         assert_eq!(

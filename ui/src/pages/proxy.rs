@@ -169,6 +169,7 @@ fn Hosts(status: ProxyStatus, version: Signal<u64>) -> Element {
                                     TableHead { {tr("Ziel")} }
                                     TableHead { class: "hidden md:table-cell", {tr("DNS-Antwort")} }
                                     TableHead { class: "w-16", {tr("Aktiv")} }
+                                    TableHead { class: "hidden w-28 sm:table-cell", {tr("Öffentlich")} }
                                     if admin {
                                         TableHead { class: "w-20" }
                                     }
@@ -214,6 +215,31 @@ fn HostRow(
         });
     };
     let link = url(&host.host, port, &https);
+    let hp = host.clone();
+    let set_public = move |on: bool| {
+        let h = hp.clone();
+        spawn(async move {
+            match api::put::<ProxyHost, _>(
+                &format!("/proxy/hosts/{}/public", h.id),
+                &nrzdns_types::PublicInput { public: on },
+            )
+            .await
+            {
+                Ok(_) => {
+                    toast(if on {
+                        trf(
+                            "„{0}“ ist jetzt öffentlich über Cloudflare erreichbar.",
+                            &[&h.host],
+                        )
+                    } else {
+                        trf("„{0}“ ist nicht mehr öffentlich.", &[&h.host])
+                    });
+                    version += 1;
+                }
+                Err(e) => toast_error(e),
+            }
+        });
+    };
     rsx! {
         TableRow {
             TableCell { class: "font-mono text-[13px] break-all",
@@ -234,6 +260,14 @@ fn HostRow(
             }
             TableCell {
                 Toggle { checked: host.enabled, disabled: !admin, onchange: toggle }
+            }
+            TableCell { class: "hidden sm:table-cell",
+                div { class: "flex items-center gap-2",
+                    Toggle { checked: host.public, disabled: !admin, onchange: set_public }
+                    if host.public {
+                        a { class: "text-xs text-orange-500 hover:underline", href: "https://{host.host}/", target: "_blank", rel: "noopener", title: tr("Öffentlich über Cloudflare"), icons::Globe { class: "size-4" } }
+                    }
+                }
             }
             if admin {
                 TableCell { class: "px-2 text-right whitespace-nowrap",
@@ -366,6 +400,7 @@ fn AddressSection(
     });
     let mut allow_requests = use_signal(|| settings.allow_requests);
     let mut port80 = use_signal(|| settings.port80);
+    let mut log_days = use_signal(|| settings.access_log_days);
     let mut busy = use_signal(|| false);
     let save = move |e: FormEvent| {
         e.prevent_default();
@@ -383,6 +418,7 @@ fn AddressSection(
                     unlock_minutes,
                     allow_requests: allow_requests(),
                     port80: port80(),
+                    access_log_days: log_days(),
                 },
             )
             .await;
@@ -431,6 +467,9 @@ fn AddressSection(
                     Field { label: tr("Zeiträume in Minuten"), hint: tr("Durch Kommas getrennt, 1 bis 1440, z. B. 15, 60, 240."),
                         input { class: "{INPUT} font-mono text-[13px]", disabled: !admin, value: "{minutes}", oninput: move |e| minutes.set(e.value()) }
                     }
+                }
+                Field { label: tr("Zugriffe aufheben (Tage)"), hint: tr("Für die Seite Zugriffe. 0 = nicht protokollieren."),
+                    input { class: "{INPUT} w-32", r#type: "number", min: 0, max: 365, disabled: !admin, value: "{log_days}", oninput: move |e| log_days.set(e.value().parse().unwrap_or(30)) }
                 }
                 Toggle { checked: allow_requests(), disabled: !admin, onchange: move |v| allow_requests.set(v),
                     label: tr("Dauerhafte Freigabe beantragen lassen"),

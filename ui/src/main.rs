@@ -23,6 +23,7 @@ use pages::devices::Devices;
 use pages::domains::Domains;
 use pages::layout::AppLayout;
 use pages::logs::Logs;
+use pages::monitor::Monitor;
 use pages::netbird::Netbird;
 use pages::not_found::NotFound;
 use pages::proxy::Proxy;
@@ -81,6 +82,8 @@ pub enum Route {
         Netbird {},
         #[route("/spy")]
         Spy {},
+        #[route("/monitor")]
+        Monitor {},
         #[route("/tools")]
         Tools {},
         #[route("/resolve?:name&:qtype")]

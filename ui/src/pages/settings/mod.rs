@@ -4,6 +4,7 @@
 
 mod account;
 mod admin;
+mod components;
 mod dns;
 mod info;
 mod integrations;
@@ -66,6 +67,12 @@ const ITEMS: &[Item] = &[
         admin_only: true,
     },
     Item {
+        key: "components",
+        label: "Komponenten",
+        group: "Instanz",
+        admin_only: false,
+    },
+    Item {
         key: "integrations",
         label: "Verbindungen",
         group: "Instanz",
@@ -114,6 +121,7 @@ fn icon(key: &str) -> Element {
         "users" => rsx! { icons::Users {} },
         "mcp" => rsx! { icons::Plug {} },
         "integrations" => rsx! { icons::Cable {} },
+        "components" => rsx! { icons::Boxes {} },
         _ => rsx! { icons::Info {} },
     }
 }
@@ -158,6 +166,7 @@ pub fn Settings(section: String) -> Element {
                     "mcp" if admin => rsx! { mcp::Mcp {} },
                     "info" => rsx! { info::Info {} },
                     "integrations" => rsx! { integrations::Integrations {} },
+                    "components" => rsx! { components::ComponentsPage {} },
                     _ => rsx! { Callout { text: tr("Diesen Bereich gibt es nicht oder er ist nur für Administratoren.") } },
                 }
             }

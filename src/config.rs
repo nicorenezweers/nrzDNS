@@ -49,6 +49,8 @@ pub struct Config {
     pub cloudflare_api: String,
     /// Vor der Prüfung warten, bis Cloudflares Nameserver den TXT-Eintrag ausliefern.
     pub acme_dns_check: bool,
+    /// GitHub-API für Updates der Komponenten (`NRZDNS_GITHUB_API`).
+    pub github_api: String,
     /// Spy: DNS über HTTPS (JSON) für den Blick von aussen.
     pub spy_doh: String,
     /// Spy: Certificate-Transparency-Suche (crt.sh).
@@ -84,6 +86,7 @@ impl Default for Config {
             acme_root: None,
             cloudflare_api: "https://api.cloudflare.com/client/v4".into(),
             acme_dns_check: true,
+            github_api: "https://api.github.com".into(),
             spy_doh: "https://cloudflare-dns.com/dns-query".into(),
             spy_crtsh: "https://crt.sh".into(),
             spy_rdap: "https://rdap.org".into(),

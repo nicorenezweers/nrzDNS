@@ -14,7 +14,7 @@ use rocket::{delete, get, post, put, routes, Route, State};
 use sqlx::SqlitePool;
 
 pub fn routes() -> Vec<Route> {
-    routes![status, save_settings, create, update, remove]
+    routes![status, save_settings, create, update, remove, set_public]
 }
 
 async fn build_status(
@@ -100,8 +100,38 @@ async fn remove(
     pool: &State<SqlitePool>,
     engine: &State<Engine>,
     state: &State<ProxyState>,
+    config: &State<Config>,
 ) -> AppResult<Status> {
+    let was_public = proxy::get(pool, id)
+        .await
+        .map(|h| h.public)
+        .unwrap_or(false);
     proxy::delete(pool, id).await?;
     sync::push_proxy(pool, engine, state).await?;
+    if was_public {
+        if let Err(e) = crate::services::components::sync_tunnel(pool, config).await {
+            tracing::warn!("Cloudflare Tunnel: {e}");
+        }
+    }
     Ok(Status::NoContent)
+}
+
+/// Über den Cloudflare Tunnel öffentlich freigeben: Tunnel-Regel und DNS-Eintrag setzen.
+/// Klappt das nicht, bleibt der Eintrag privat.
+#[put("/proxy/hosts/<id>/public", data = "<body>")]
+async fn set_public(
+    admin: AdminUser,
+    id: i64,
+    body: Json<nrzdns_types::PublicInput>,
+    pool: &State<SqlitePool>,
+    config: &State<Config>,
+) -> AppResult<Json<ProxyHost>> {
+    let before = proxy::get(pool, id).await?;
+    let host = proxy::set_public(pool, id, body.public).await?;
+    if let Err(e) = crate::services::components::sync_tunnel(pool, config).await {
+        proxy::set_public(pool, id, before.public).await?;
+        return Err(e);
+    }
+    tracing::info!(host = %host.host, public = body.public, by = %admin.0.username, "Freigabe über Cloudflare geändert");
+    Ok(Json(host))
 }

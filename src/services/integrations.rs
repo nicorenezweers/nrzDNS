@@ -160,6 +160,7 @@ pub fn netbird_allowed(method: &Method, segments: &[&str]) -> bool {
         "posture-checks",
         "accounts",
         "routes",
+        "reverse-proxies",
     ];
     let Some(first) = segments.first() else {
         return false;
@@ -266,6 +267,38 @@ pub async fn cloudflare(
     );
     if let Some(q) = query.filter(|q| !q.is_empty()) {
         url.push('?');
+        url.push_str(q);
+    }
+    let mut req = client()?.request(method, url).bearer_auth(token);
+    if let Some(b) = body {
+        req = req.json(&b);
+    }
+    send(req, "Cloudflare").await
+}
+
+/// Interne Anfrage an Cloudflare ohne Freigabeliste (nur für nrzNetwork selbst, z. B. den
+/// Tunnel). `path` ohne `/client/v4/`, darf eine Query enthalten.
+pub(crate) async fn cloudflare_raw(
+    pool: &SqlitePool,
+    config: &Config,
+    method: Method,
+    path: &str,
+    query: Option<&str>,
+    body: Option<Value>,
+) -> AppResult<Upstream> {
+    let token = cloudflare_token(pool).await?;
+    if token.is_empty() {
+        return Err(AppError::bad(
+            "Cloudflare ist nicht verbunden – Token unter Einstellungen → Verbindungen eintragen.",
+        ));
+    }
+    let mut url = format!(
+        "{}/{}",
+        config.cloudflare_api.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    );
+    if let Some(q) = query.filter(|q| !q.is_empty()) {
+        url.push(if url.contains('?') { '&' } else { '?' });
         url.push_str(q);
     }
     let mut req = client()?.request(method, url).bearer_auth(token);

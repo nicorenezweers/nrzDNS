@@ -14,6 +14,7 @@
 //! bleibt; dazu kommen `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Host`, `X-Forwarded-Proto`.
 //! Weiterleitungen des Ziels auf seine eigene Adresse werden auf den Namen umgeschrieben.
 
+pub mod access;
 mod page;
 pub mod tls;
 
@@ -100,6 +101,7 @@ struct Inner {
     errors: Mutex<Vec<String>>,
     actions: Mutex<HashMap<IpAddr, Vec<i64>>>,
     tls: tls::TlsRuntime,
+    access: access::AccessBuffer,
 }
 
 /// Kennzeichnet weitergereichte Anfragen – kommt eine davon wieder an, zeigt ein Eintrag auf
@@ -119,6 +121,7 @@ impl ProxyState {
             errors: Mutex::default(),
             actions: Mutex::default(),
             tls: tls::TlsRuntime::default(),
+            access: access::AccessBuffer::default(),
         }))
     }
 
@@ -142,7 +145,7 @@ impl ProxyState {
             .unwrap_or_else(PoisonError::into_inner) = settings;
     }
 
-    fn settings(&self) -> ProxySettings {
+    pub(crate) fn settings(&self) -> ProxySettings {
         self.0
             .settings
             .read()
@@ -380,6 +383,21 @@ async fn handle(
     scheme: Scheme,
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
+    let meta = access::RequestMeta::read(&req, peer, &state);
+    // Über Cloudflare kam der Besucher per HTTPS an, auch wenn der Tunnel intern HTTP spricht
+    let scheme = meta.scheme(scheme);
+    let resp = route(state.clone(), client, peer, scheme, req).await?;
+    state.record(meta, &resp);
+    Ok(resp)
+}
+
+async fn route(
+    state: ProxyState,
+    client: Client<HttpConnector>,
+    peer: SocketAddr,
+    scheme: Scheme,
+    req: Request<Body>,
+) -> Result<Response<Body>, Infallible> {
     let lang = page::Lang::from_headers(req.headers());
     if req.uri().path() == "/.nrznetwork/health" {
         return Ok(Response::new(Body::from(HEALTH_BODY)));
@@ -412,21 +430,28 @@ async fn handle(
             && state.tls().covers(&host)
             && !req.uri().path().starts_with(ACTION_PREFIX)
         {
-            return Ok(https_redirect(&req, &host));
+            return Ok(access::mark(
+                https_redirect(&req, &host),
+                access::AccessKind::Redirect,
+            ));
         }
         let authority = state.connect_authority(&target);
-        return Ok(forward(
-            &client, req, peer, scheme, &host, &raw_host, &target, &authority, lang,
-        )
-        .await);
+        return Ok(access::mark(
+            forward(
+                &client, req, peer, scheme, &host, &raw_host, &target, &authority, lang,
+            )
+            .await,
+            access::AccessKind::Entry,
+        ));
     }
 
     // 2. Gesperrt → Sperrseite (auch für ihre Aktionen)
     if !is_device_name(&host) {
         if let Some(matches) = state.blocked(&host) {
-            return Ok(
+            return Ok(access::mark(
                 page::handle_blocked(&state, req, peer, &host, &raw_host, matches, lang).await,
-            );
+                access::AccessKind::Blocked,
+            ));
         }
     }
 

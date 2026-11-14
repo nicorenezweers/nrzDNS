@@ -39,6 +39,24 @@ impl Fairing for ProxyServer {
                 state.clone(),
                 rocket.shutdown(),
             ));
+            tokio::spawn(write_access_log(
+                pool.clone(),
+                state.clone(),
+                config.host_gateway.clone(),
+                rocket.shutdown(),
+            ));
+            if let Some(comps) = rocket.state::<crate::services::components::Components>() {
+                comps.spawn_supervisors(rocket.shutdown());
+                if let Err(e) = comps.apply(&pool, config).await {
+                    tracing::warn!("Komponenten: {e}");
+                }
+                tokio::spawn(crate::services::components::scheduler(
+                    pool.clone(),
+                    config.clone(),
+                    comps.clone(),
+                    rocket.shutdown(),
+                ));
+            }
             tokio::spawn(renew_certificates(
                 pool,
                 engine,
@@ -115,5 +133,38 @@ async fn renew_certificates(
         }
         crate::services::tls::maybe_renew(&pool, &engine, &state, &config).await;
         wait = Duration::from_secs(3600);
+    }
+}
+
+/// Zugriffsprotokoll: alle 2 s speichern, stündlich alte Einträge löschen.
+async fn write_access_log(
+    pool: SqlitePool,
+    state: ProxyState,
+    gateway: Option<String>,
+    mut shutdown: rocket::Shutdown,
+) {
+    state
+        .access()
+        .set_gateway(crate::services::access::resolve_gateway(gateway.as_deref()).await);
+    let mut tick: u32 = 0;
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+            _ = &mut shutdown => {
+                let _ = crate::services::access::flush(&pool, &state).await;
+                break;
+            }
+        }
+        if let Err(e) = crate::services::access::flush(&pool, &state).await {
+            tracing::warn!("Zugriffsprotokoll: {e}");
+        }
+        tick = tick.wrapping_add(1);
+        if tick % 1800 == 1 {
+            match crate::services::access::purge(&pool).await {
+                Ok(n) if n > 0 => tracing::info!("Zugriffsprotokoll: {n} alte Einträge gelöscht"),
+                Err(e) => tracing::warn!("Zugriffsprotokoll aufräumen: {e}"),
+                _ => {}
+            }
+        }
     }
 }
