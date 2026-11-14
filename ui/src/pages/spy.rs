@@ -1,6 +1,7 @@
 //! Spy: was andere im Internet über deine Domain wissen können – mit Bewertung und
 //! Empfehlungen.
 
+use crate::Route;
 use crate::api;
 use crate::components::common::*;
 use crate::components::overlay::*;
@@ -10,7 +11,7 @@ use crate::state;
 use crate::ui::table::*;
 use crate::util;
 use dioxus::prelude::*;
-use nrzdns_types::{Severity, SpyReport, SpyScanInput, SpyStatus};
+use nrzdns_types::{Severity, SpyHistoryEntry, SpyReport, SpyScanInput, SpySettings, SpyStatus};
 
 #[component]
 pub fn Spy() -> Element {
@@ -21,8 +22,10 @@ pub fn Spy() -> Element {
         api::get::<SpyStatus>("/spy").await
     });
     let mut domain = use_signal(String::new);
-    let mut active = use_signal(|| false);
+    let mut active = use_signal(|| true);
     let mut selected = use_signal(String::new);
+    // Bericht aus dem Verlauf (Domain, Zeitpunkt)
+    let mut viewing = use_signal(|| None::<(String, i64)>);
     let mut busy = use_signal(|| false);
 
     let running = matches!(&*status.read(), Some(Ok(s)) if s.running);
@@ -35,14 +38,9 @@ pub fn Spy() -> Element {
             });
         }
     });
-    // Vorbelegen: erste eigene Domain (oder der letzte Bericht)
     use_effect(move || {
         let first = match &*status.read() {
-            Some(Ok(s)) => s
-                .own_domains
-                .first()
-                .or(s.reports.first().map(|r| &r.domain))
-                .cloned(),
+            Some(Ok(s)) => s.own_domains.first().cloned(),
             _ => None,
         };
         let empty = domain.peek().is_empty();
@@ -54,16 +52,11 @@ pub fn Spy() -> Element {
         Some(Ok(s)) => s.own_domains.clone(),
         _ => Vec::new(),
     };
-    let d_now = domain().trim().to_lowercase();
-    let is_own = own
-        .iter()
-        .any(|o| d_now == *o || d_now.ends_with(&format!(".{o}")));
-
     let start = move |e: FormEvent| {
         e.prevent_default();
         let input = SpyScanInput {
             domain: domain().trim().to_string(),
-            active: active() && is_own,
+            active: active(),
         };
         spawn(async move {
             busy.set(true);
@@ -72,36 +65,50 @@ pub fn Spy() -> Element {
             match res {
                 Ok(_) => {
                     selected.set(input.domain.to_lowercase());
+                    viewing.set(None);
                     tick += 1;
                 }
                 Err(e) => toast_error(e),
             }
         });
     };
+    let old_report = use_resource(move || async move {
+        match viewing() {
+            Some((d, at)) => Some(
+                api::get::<SpyReport>(&format!("/spy/report?domain={}&at={at}", api::enc(&d)))
+                    .await,
+            ),
+            None => None,
+        }
+    });
 
     rsx! {
-        PageHeader { title: tr("Spy"), description: tr("Was andere im Internet über dich wissen können: Namen aus Zertifikaten, E-Mails, DNS, Mail-Anbieter, Hoster, dein Anschluss zu Hause – mit Bewertung und Empfehlungen.") }
+        PageHeader { title: tr("Spy"), description: tr("Was andere im Internet über deine Domains wissen können – Subdomains aus Zertifikaten, E-Mails, DNS-Einträge, Mail- und DNS-Anbieter, Hoster, dein Anschluss zu Hause, alle offenen Ports. Mit Bewertung, Anleitungen und täglichem Protokoll.") }
         div { class: "grid grid-cols-1 gap-6",
-            Section { title: tr("Domain prüfen"), description: tr("Nur öffentliche Quellen, genau wie ein Angreifer: Certificate-Transparency-Logs (crt.sh), DNS von aussen, Registrierungsdaten (RDAP). Aktive Prüfungen (Webserver, offene Ports) gibt es nur für eigene Domains."),
-                form { class: "grid grid-cols-1 gap-3", onsubmit: start,
-                    div { class: "grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]",
-                        input { class: "{INPUT} font-mono text-[13px]", list: "spy-domains", required: true, spellcheck: false, autocapitalize: "none",
-                            disabled: !admin, placeholder: "zweers.ch", value: "{domain}", oninput: move |e| domain.set(e.value()) }
-                        datalist { id: "spy-domains", for d in own.iter() { option { key: "{d}", value: "{d}" } } }
-                        if admin {
-                            button { class: btn(BTN_PRIMARY), r#type: "submit", disabled: running || busy() || domain().trim().is_empty(),
-                                if running { icons::LoaderCircle { class: "size-4 animate-spin" } } else { icons::ScanEye {} }
-                                {tr("Scan starten")}
+            Section { title: tr("Domain prüfen"), description: tr("Nur deine eigenen Domains (aus Cloudflare und den HTTPS-Einstellungen). Gesammelt wird, was ein Angreifer sieht: Certificate-Transparency-Logs, DNS von aussen, Registrierungsdaten – dazu aktiv Webserver und Ports."),
+                if own.is_empty() {
+                    Callout { text: tr("Noch keine eigene Domain bekannt – Cloudflare unter Einstellungen → Verbindungen verbinden oder unter Reverse Proxy → HTTPS die Domain eintragen.") }
+                } else {
+                    form { class: "grid grid-cols-1 gap-3", onsubmit: start,
+                        div { class: "grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]",
+                            select { class: "{SELECT} font-mono text-[13px]", disabled: !admin, value: "{domain}", onchange: move |e| domain.set(e.value()),
+                                for d in own.iter() { option { key: "{d}", value: "{d}", "{d}" } }
+                            }
+                            if admin {
+                                button { class: btn(BTN_PRIMARY), r#type: "submit", disabled: running || busy() || domain().is_empty(),
+                                    if running { icons::LoaderCircle { class: "size-4 animate-spin" } } else { icons::ScanEye {} }
+                                    {tr("Scan starten")}
+                                }
                             }
                         }
-                    }
-                    if admin {
-                        Toggle { checked: active() && is_own, disabled: !is_own, onchange: move |v| active.set(v),
-                            label: tr("Auch aktiv prüfen (Webserver-Kopfzeilen, offene Ports)"),
-                            hint: if is_own { tr("Fragt deine öffentlichen Server direkt an. Ports werden von innen geprüft – dein Router kann von aussen anders aussehen.") } else { tr("Nur für eigene Domains (aus Cloudflare oder den HTTPS-Einstellungen).") },
+                        if admin {
+                            Toggle { checked: active(), onchange: move |v| active.set(v),
+                                label: tr("Auch aktiv prüfen (Webserver, alle Ports)"),
+                                hint: tr("Fragt deine öffentlichen Server und deinen Anschluss direkt an. Alle 65 535 Ports dauern je Adresse ein paar Minuten. Geprüft wird von innen – dein Router kann von aussen anders aussehen."),
+                            }
+                        } else {
+                            ReadOnlyHint {}
                         }
-                    } else {
-                        ReadOnlyHint {}
                     }
                 }
                 if let Some(Ok(s)) = &*status.read() {
@@ -113,9 +120,18 @@ pub fn Spy() -> Element {
                                     "{p}"
                                 }
                             }
+                            if s.running && s.port_progress > 0 && s.port_progress < 100 {
+                                div { class: "mt-2 h-2 overflow-hidden rounded-full bg-muted",
+                                    div { class: "h-full bg-primary transition-all", style: format!("width: {}%", s.port_progress) }
+                                }
+                                p { class: "mt-1 text-xs text-muted-foreground", {trf("Ports: {0} %", &[&s.port_progress.to_string()])} }
+                            }
                         }
                     }
                 }
+            }
+            if let Some(Ok(s)) = &*status.read() {
+                Schedule { key: "{s.settings.auto}-{s.settings.hour}-{s.settings.all_ports}-{s.settings.scan_home}", settings: s.settings.clone(), admin, tick }
             }
             match &*status.read() {
                 None => rsx! { Loading {} },
@@ -123,23 +139,143 @@ pub fn Spy() -> Element {
                 Some(Ok(s)) if s.reports.is_empty() => rsx! {},
                 Some(Ok(s)) => {
                     let current = s.reports.iter().find(|r| r.domain == selected()).or(s.reports.first()).cloned().unwrap_or_default();
+                    let history: Vec<SpyHistoryEntry> = s.history.iter().filter(|h| h.domain == current.domain).cloned().collect();
+                    let shown = match (viewing(), &*old_report.read()) {
+                        (Some(_), Some(Some(Ok(r)))) => r.clone(),
+                        _ => current.clone(),
+                    };
                     rsx! {
                         if s.reports.len() > 1 {
                             div { class: "flex flex-wrap gap-2",
                                 for r in s.reports.iter().cloned() {
                                     button { key: "{r.domain}", class: if r.domain == current.domain { btn_sm(BTN_PRIMARY) } else { btn_sm(BTN_OUTLINE) },
-                                        onclick: move |_| selected.set(r.domain.clone()),
+                                        onclick: move |_| { selected.set(r.domain.clone()); viewing.set(None); },
                                         "{r.domain}"
                                         span { class: "ml-1 opacity-70", "{r.score}" }
                                     }
                                 }
                             }
                         }
-                        Report { report: current, admin, tick }
+                        if viewing().is_some() {
+                            div { class: "flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm",
+                                span { {trf("Älterer Bericht vom {0}", &[&util::datetime(shown.scanned_at)])} }
+                                button { class: btn_sm(BTN_OUTLINE), onclick: move |_| viewing.set(None), {tr("Zum neuesten")} }
+                            }
+                        }
+                        Report { report: shown, admin, tick }
+                        History { entries: history, viewing }
                     }
                 }
             }
         }
+    }
+}
+
+/// Täglicher Scan aller eigenen Domains.
+#[component]
+fn Schedule(settings: SpySettings, admin: bool, tick: Signal<u64>) -> Element {
+    let mut auto = use_signal(|| settings.auto);
+    let mut hour = use_signal(|| settings.hour);
+    let mut all_ports = use_signal(|| settings.all_ports);
+    let mut scan_home = use_signal(|| settings.scan_home);
+    let save = move |e: FormEvent| {
+        e.prevent_default();
+        let body = SpySettings {
+            auto: auto(),
+            hour: hour(),
+            all_ports: all_ports(),
+            scan_home: scan_home(),
+        };
+        spawn(async move {
+            match api::put::<SpyStatus, _>("/spy/settings", &body).await {
+                Ok(_) => {
+                    toast(tr("Gespeichert."));
+                    tick += 1;
+                }
+                Err(e) => toast_error(e),
+            }
+        });
+    };
+    let hours: Vec<u8> = (0..24).collect();
+    rsx! {
+        Section { title: tr("Protokoll und Zeitplan"), description: tr("Spy prüft alle eigenen Domains automatisch und vergleicht mit dem letzten Mal – neue Subdomains, neue offene Ports, neue Zertifikate und behobene Punkte stehen im Verlauf."),
+            form { class: "grid grid-cols-1 gap-4", onsubmit: save,
+                div { class: "grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-end",
+                    Toggle { checked: auto(), disabled: !admin, onchange: move |v| auto.set(v), label: tr("Täglich automatisch prüfen (mit aktiven Prüfungen)") }
+                    Field { label: tr("Uhrzeit"),
+                        select { class: "{SELECT} w-32", disabled: !admin || !auto(), value: "{hour}", onchange: move |e| hour.set(e.value().parse().unwrap_or(4)),
+                            for h in hours { option { key: "{h}", value: "{h}", {format!("{h:02}:00")} } }
+                        }
+                    }
+                }
+                Toggle { checked: all_ports(), disabled: !admin, onchange: move |v| all_ports.set(v), label: tr("Alle 65 535 Ports prüfen"), hint: tr("Sonst nur die rund 30 wichtigsten (schneller).") }
+                Toggle { checked: scan_home(), disabled: !admin, onchange: move |v| scan_home.set(v), label: tr("Auch deinen Internetanschluss prüfen"), hint: tr("Die öffentliche Adresse dieses Anschlusses – auch wenn kein Eintrag darauf zeigt, Bots finden sie trotzdem.") }
+                if admin {
+                    div { class: "flex justify-end", button { class: btn(BTN_PRIMARY), r#type: "submit", {tr("Speichern")} } }
+                }
+            }
+        }
+    }
+}
+
+/// Verlauf einer Domain mit Änderungen.
+#[component]
+fn History(entries: Vec<SpyHistoryEntry>, viewing: Signal<Option<(String, i64)>>) -> Element {
+    if entries.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        Section { title: tr("Verlauf"), description: tr("Jeder Scan mit Bewertung und dem, was sich seit dem vorigen geändert hat."),
+            div { class: "grid gap-2",
+                for e in entries.iter().cloned() {
+                    {
+                        let (g, gcls) = grade(e.score);
+                        let key = (e.domain.clone(), e.scanned_at);
+                        rsx! {
+                            div { key: "{e.scanned_at}", class: "rounded-lg border p-3 text-sm",
+                                div { class: "flex flex-wrap items-center gap-3",
+                                    span { class: "inline-flex size-8 items-center justify-center rounded-full border-2 text-sm font-bold {gcls}", "{g}" }
+                                    div { class: "min-w-0 flex-1",
+                                        p { class: "font-medium", {util::datetime(e.scanned_at)} if e.scheduled { span { class: "ml-2 text-xs font-normal text-muted-foreground", {tr("automatisch")} } } }
+                                        p { class: "text-xs text-muted-foreground", {trf("Bewertung {0}/100 · {1} Punkte zum Verbessern", &[&e.score.to_string(), &e.problems.to_string()])} }
+                                    }
+                                    button { class: btn_sm(BTN_GHOST), onclick: move |_| viewing.set(Some(key.clone())), icons::Eye {} {tr("Ansehen")} }
+                                }
+                                if !e.changes.is_empty() {
+                                    ul { class: "mt-2 grid gap-0.5 pl-11 text-xs",
+                                        for (i, c) in e.changes.iter().enumerate() {
+                                            li { key: "{i}", class: if c.starts_with("Behoben") || c.starts_with("Port geschlossen") || c.starts_with("Nicht mehr") { "text-emerald-500" } else if c.starts_with("Bewertung") { "text-muted-foreground" } else { "text-amber-500" }, "{c}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Wohin der Knopf einer Anleitung führt.
+fn link_route(link: &str) -> Option<(Route, String)> {
+    match link {
+        "dns" => Some((Route::Domains {}, tr("DNS-Einträge öffnen"))),
+        "proxy" | "https" => Some((Route::Proxy {}, tr("Reverse Proxy öffnen"))),
+        "integrations" => Some((
+            Route::Settings {
+                section: "integrations".into(),
+            },
+            tr("Verbindungen öffnen"),
+        )),
+        "components" => Some((
+            Route::Settings {
+                section: "components".into(),
+            },
+            tr("Komponenten öffnen"),
+        )),
+        "netbird" => Some((Route::Netbird {}, tr("NetBird öffnen"))),
+        _ => None,
     }
 }
 
@@ -239,6 +375,17 @@ fn Report(report: SpyReport, admin: bool, tick: Signal<u64>) -> Element {
                                                 for (j, it) in f.items.iter().enumerate() { p { key: "{j}", class: "break-all", "{it}" } }
                                             }
                                         }
+                                        if !f.steps.is_empty() {
+                                            div { class: "rounded-md border bg-background p-3",
+                                                p { class: "mb-1.5 flex items-center gap-1.5 font-medium", icons::ListChecks { class: "size-4" } {tr("So behebst du es")} }
+                                                ol { class: "grid list-decimal gap-1 pl-5 text-muted-foreground",
+                                                    for (j, st) in f.steps.iter().enumerate() { li { key: "{j}", "{st}" } }
+                                                }
+                                                if let Some((route, label)) = link_route(&f.link) {
+                                                    Link { class: "{btn_sm(BTN_OUTLINE)} mt-3", to: route, icons::ArrowRight {} "{label}" }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -285,7 +432,8 @@ fn Report(report: SpyReport, admin: bool, tick: Signal<u64>) -> Element {
                                     if !h.cname.is_empty() { p { class: "text-xs text-muted-foreground", "→ {h.cname}" } }
                                 }
                                 TableCell { class: "font-mono text-xs break-all",
-                                    if h.addresses.is_empty() { span { class: "text-muted-foreground", {tr("löst nicht auf")} } }
+                                    if h.dangling { Pill { tone: Tone::Danger, {tr("verwaist – Übernahme möglich")} } }
+                                    else if h.addresses.is_empty() { span { class: "text-muted-foreground", {tr("löst nicht auf")} } }
                                     for a in h.addresses.iter() {
                                         {
                                             let info = r.addresses.iter().find(|x| x.ip == *a).cloned().unwrap_or_default();
@@ -307,6 +455,7 @@ fn Report(report: SpyReport, admin: bool, tick: Signal<u64>) -> Element {
                                             p { "{h.http_status} · " if h.https { "HTTPS" } else { "HTTP" } if h.hsts { " · HSTS" } }
                                             if !h.server.is_empty() { p { class: "text-muted-foreground break-all", "{h.server}" } }
                                             if !h.title.is_empty() { p { class: "text-muted-foreground break-all", "„{h.title}“" } }
+                                            if !h.missing_headers.is_empty() { p { class: "text-amber-500 break-all", {trf("fehlt: {0}", &[&h.missing_headers.join(", ")])} } }
                                         } else { span { class: "text-muted-foreground", "–" } }
                                     }
                                 }
@@ -340,7 +489,14 @@ fn Report(report: SpyReport, admin: bool, tick: Signal<u64>) -> Element {
                                     TableCell { class: "font-mono text-xs",
                                         if a.cdn || a.private { span { class: "text-muted-foreground", {tr("nicht geprüft")} } }
                                         else if a.open_ports.is_empty() { span { class: "text-emerald-500", {tr("keine")} } }
-                                        else { {a.open_ports.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")} }
+                                        else {
+                                            for p in a.open_ports.iter() {
+                                                p { key: "{p}", class: if [80u16, 443].contains(p) { "" } else { "text-destructive" },
+                                                    "{p}"
+                                                    if !nrzdns_types::port_service(*p).is_empty() { span { class: "font-sans text-muted-foreground", " – {nrzdns_types::port_service(*p)}" } }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

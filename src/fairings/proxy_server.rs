@@ -57,6 +57,14 @@ impl Fairing for ProxyServer {
                     rocket.shutdown(),
                 ));
             }
+            if let Some(spy) = rocket.state::<crate::services::spy::SpyState>() {
+                tokio::spawn(crate::services::spy::scheduler(
+                    pool.clone(),
+                    config.clone(),
+                    spy.clone(),
+                    rocket.shutdown(),
+                ));
+            }
             tokio::spawn(renew_certificates(
                 pool,
                 engine,

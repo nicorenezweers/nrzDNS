@@ -96,7 +96,9 @@
 //! | `POST /components/netbird-key` | → [`ComponentsStatus`] (Setup-Key über die NetBird-API erzeugen) | Admin |
 //! | `GET /spy` | → [`SpyStatus`] (laufender Scan, eigene Domains, letzte Berichte) | angemeldet |
 //! | `POST /spy/scan` | [`SpyScanInput`] → [`SpyStatus`] (Scan im Hintergrund; aktiv nur für eigene Domains) | Admin |
-//! | `DELETE /spy/reports/<domain>` | → `204` | Admin |
+//! | `GET /spy/report?domain=&at=` | → [`SpyReport`] (ein Bericht aus dem Verlauf) | angemeldet |
+//! | `PUT /spy/settings` | [`SpySettings`] → [`SpyStatus`] (täglicher Scan, alle Ports) | Admin |
+//! | `DELETE /spy/reports/<domain>` | → `204` (Verlauf der Domain löschen) | Admin |
 //! | `POST /tools/ping` | [`PingInput`] → [`PingResult`] (ICMP, sonst TCP) | angemeldet |
 //! | `POST /tools/ports` | [`PortsInput`] → [`PortsResult`] | angemeldet |
 //! | `POST /tools/http` | [`HttpCheckInput`] → [`HttpCheckResult`] | angemeldet |

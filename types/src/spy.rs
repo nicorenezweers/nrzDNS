@@ -4,12 +4,12 @@
 
 use serde::{Deserialize, Serialize};
 
-/// `POST /spy/scan`
+/// `POST /spy/scan` – nur eigene Domains (Cloudflare-Zonen, HTTPS-Namen).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SpyScanInput {
     pub domain: String,
-    /// Auch Webserver und Ports der gefundenen Adressen prüfen (nur eigene Domains).
+    /// Auch Webserver und Ports prüfen.
     pub active: bool,
 }
 
@@ -36,6 +36,13 @@ pub struct SpyFinding {
     pub advice: String,
     /// Betroffene Namen, Adressen …
     pub items: Vec<String>,
+    /// Anleitung Schritt für Schritt.
+    pub steps: Vec<String>,
+    /// Stelle in nrzNetwork, wo man es beheben kann (`dns`, `proxy`, `https`,
+    /// `integrations`, `components`, `netbird`), leer = keine.
+    pub link: String,
+    /// Fester Schlüssel (für den Vergleich zwischen zwei Scans), z. B. `ct-names`.
+    pub id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -109,6 +116,10 @@ pub struct SpyHost {
     pub title: String,
     pub hsts: bool,
     pub https: bool,
+    /// Fehlende Sicherheits-Kopfzeilen (nur bei Antworten < 400).
+    pub missing_headers: Vec<String>,
+    /// Ziel des CNAME löst nicht auf (Übernahme der Subdomain möglich).
+    pub dangling: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -150,6 +161,51 @@ pub struct SpyReport {
     pub services: Vec<String>,
     /// Quellen, die nicht geantwortet haben.
     pub errors: Vec<String>,
+    /// Änderungen seit dem vorigen Scan.
+    pub changes: Vec<String>,
+    /// So viele Ports je Adresse geprüft (0 = keine Portprüfung).
+    pub ports_scanned: u32,
+    /// Öffentliche Adresse dieses Anschlusses.
+    pub home_ip: String,
+    /// Automatisch (Zeitplan) oder von Hand gestartet.
+    pub scheduled: bool,
+}
+
+/// Ein Eintrag im Verlauf.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SpyHistoryEntry {
+    pub domain: String,
+    pub scanned_at: i64,
+    pub score: u8,
+    pub problems: u32,
+    pub changes: Vec<String>,
+    pub scheduled: bool,
+}
+
+/// `PUT /spy/settings`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SpySettings {
+    /// Täglich alle eigenen Domains prüfen.
+    pub auto: bool,
+    /// Stunde (Ortszeit) für den täglichen Scan.
+    pub hour: u8,
+    /// Alle 65 535 Ports prüfen (sonst nur die wichtigsten).
+    pub all_ports: bool,
+    /// Auch die öffentliche Adresse dieses Anschlusses prüfen.
+    pub scan_home: bool,
+}
+
+impl Default for SpySettings {
+    fn default() -> Self {
+        Self {
+            auto: true,
+            hour: 4,
+            all_ports: true,
+            scan_home: true,
+        }
+    }
 }
 
 /// `GET /spy`
@@ -160,6 +216,57 @@ pub struct SpyStatus {
     pub progress: Vec<String>,
     /// Eigene Domains (Cloudflare-Zonen, HTTPS-Namen) – nur dafür gibt es aktive Prüfungen.
     pub own_domains: Vec<String>,
-    /// Letzte Berichte, neuester zuerst.
+    /// Letzter Bericht je Domain, neuester zuerst.
     pub reports: Vec<SpyReport>,
+    /// Verlauf aller Scans, neuester zuerst.
+    pub history: Vec<SpyHistoryEntry>,
+    pub settings: SpySettings,
+    /// Fortschritt der Portprüfung (0–100, nur während eines Scans).
+    pub port_progress: u8,
+}
+
+/// Bekannte Dienste hinter Ports (für Anzeige und Bewertung).
+pub fn port_service(port: u16) -> &'static str {
+    match port {
+        21 => "FTP",
+        22 => "SSH",
+        23 => "Telnet",
+        25 => "SMTP",
+        53 => "DNS",
+        80 => "HTTP",
+        110 => "POP3",
+        111 => "RPC",
+        139 | 445 => "SMB (Windows-Freigabe)",
+        143 => "IMAP",
+        443 => "HTTPS",
+        465 | 587 => "SMTP (Mail-Versand)",
+        993 => "IMAPS",
+        995 => "POP3S",
+        1080 => "SOCKS-Proxy",
+        1194 => "OpenVPN",
+        1433 => "MS SQL",
+        1883 | 8883 => "MQTT",
+        2049 => "NFS",
+        2375 | 2376 => "Docker-API",
+        3000 => "Web-App (z. B. Grafana)",
+        3306 => "MySQL/MariaDB",
+        3389 => "Remotedesktop (RDP)",
+        5000 | 5001 => "Synology/Web-App",
+        5432 => "PostgreSQL",
+        5900..=5910 => "VNC (Bildschirmfreigabe)",
+        6379 => "Redis",
+        8000 | 8008 | 8080 | 8888 => "Web (alternativ)",
+        8096 => "Jellyfin",
+        8123 => "Home Assistant",
+        8443 => "HTTPS (alternativ)",
+        9000 => "Portainer/Web-App",
+        9090 => "Prometheus/Cockpit",
+        9100 => "Drucker/Exporter",
+        9200 | 9300 => "Elasticsearch",
+        11211 => "Memcached",
+        27017 => "MongoDB",
+        32400 => "Plex",
+        51820 => "WireGuard",
+        _ => "",
+    }
 }

@@ -156,26 +156,87 @@ async fn passive_scan_report() {
     assert_eq!(addr("85.1.2.3")["home"], true);
     assert_eq!(addr("85.1.2.3")["provider"], "Swisscom (Schweiz) AG");
     assert_eq!(addr("192.168.0.198")["private"], true);
-    let titles: Vec<String> = r["findings"]
+    let ids: Vec<String> = r["findings"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|f| f["title"].as_str().unwrap().to_string())
+        .map(|f| f["id"].as_str().unwrap().to_string())
         .collect();
-    for t in [
-        "Einträge zeigen auf deinen Anschluss zu Hause",
-        "Interne Adressen im öffentlichen DNS",
-        "1 E-Mail-Adresse(n) in Zertifikaten",
-        "2 Namen in öffentlichen Zertifikaten",
-        "DMARC nur beobachtend (p=none)",
-        "Kein DNSSEC",
-        "Kein CAA-Eintrag",
+    for id in [
+        "home-ip",
+        "private-dns",
+        "ct-emails",
+        "ct-names",
+        "dmarc-none",
+        "dnssec",
+        "caa",
     ] {
-        assert!(titles.iter().any(|x| x == t), "{t} fehlt: {titles:?}");
+        assert!(ids.iter().any(|x| x == id), "{id} fehlt: {ids:?}");
     }
+    let ct = r["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["id"] == "ct-names")
+        .unwrap();
+    assert_eq!(
+        ct["title"], "2 Subdomains in öffentlichen Zertifikaten",
+        "{ct}"
+    );
+    assert!(ct["steps"].as_array().unwrap().len() >= 3);
+    assert_eq!(ct["link"], "https");
     assert_eq!(r["findings"][0]["severity"], "high");
     assert!(r["score"].as_u64().unwrap() < 60, "{}", r["score"]);
     assert!(v["progress"].to_string().contains("Fertig"), "{v}");
+
+    // Zweiter Scan: Verlauf, keine Änderungen, Bericht aus dem Verlauf abrufbar
+    let first_at = r["scannedAt"].as_i64().unwrap();
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let (s, _) = post(
+        &client,
+        "/api/v1/spy/scan",
+        json!({ "domain": "zweers.ch" }),
+    )
+    .await;
+    assert_eq!(s, Status::Ok);
+    for _ in 0..100 {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        v = get(&client, "/api/v1/spy").await.1;
+        if v["running"] == false {
+            break;
+        }
+    }
+    assert_eq!(
+        v["history"].as_array().unwrap().len(),
+        2,
+        "{}",
+        v["history"]
+    );
+    assert_eq!(
+        v["reports"].as_array().unwrap().len(),
+        1,
+        "je Domain der neueste"
+    );
+    assert_eq!(v["reports"][0]["changes"], json!([]), "nichts geändert");
+    let (s, old) = get(
+        &client,
+        format!("/api/v1/spy/report?domain=zweers.ch&at={first_at}"),
+    )
+    .await;
+    assert_eq!(s, Status::Ok);
+    assert_eq!(old["scannedAt"], first_at);
+
+    // Zeitplan
+    let (s, v) = put(
+        &client,
+        "/api/v1/spy/settings",
+        json!({ "auto": true, "hour": 5, "allPorts": true, "scanHome": false }),
+    )
+    .await;
+    assert_eq!(s, Status::Ok, "{v}");
+    assert_eq!(v["settings"]["hour"], 5);
+    let (s, _) = put(&client, "/api/v1/spy/settings", json!({ "hour": 24 })).await;
+    assert_eq!(s, Status::BadRequest);
 
     // Mitglieder lesen, starten nicht
     common::logout(&client).await;

@@ -27,11 +27,11 @@ nrzNetwork beantwortet die DNS-Anfragen deines ganzen Netzes mit einem kleinen P
 | **DNS-Client** | Diesen Server (mit Zonen, Sperren und Cache) oder jeden anderen über UDP, TCP, DoT oder DoH fragen, für jeden Eintragstyp – mit Flags, Antwort-, Authority- und Additional-Abschnitt. |
 | **MCP-Server** | **Model Context Protocol** unter `/mcp` für [nrzDashboard](#mcp-server-nrzdashboard) und andere MCP-Clients: alle Kennzahlen für eine Übersicht in einem Aufruf, Statistiken, Abfrageprotokoll, Zustand von Server und Sperren – und, wenn der Admin es erlaubt, Filter ein-/ausschalten, pausieren, Sperrlisten umschalten, Regeln anlegen, Cache leeren. |
 | **Reverse Proxy** | Namen statt IP und Port: `music.nrz.ch` → `http://100.78.107.162:8350`, `bench.nrz.ch` → `http://100.78.107.162:8550`. nrzNetwork beantwortet den Namen selbst mit der Adresse des Proxys, der eingebaute HTTP-Proxy reicht nach dem `Host`-Header weiter – mit Streaming, WebSockets und umgeschriebenen Weiterleitungen. Die Domain muss dir nicht gehören; es klappt auf allen Geräten, die nrzNetwork benutzen. Nur HTTP. |
-| **Domains (Cloudflare)** | Alle Zonen deines Cloudflare-Kontos und **alle DNS-Einträge** an einem Ort: A, AAAA, CNAME, TXT, MX, NS, SRV, CAA – anlegen, ändern, löschen, suchen, Cloudflare-Proxy (orange Wolke) ein/aus, TTL und Kommentare. |
+| **DNS-Einträge (Cloudflare)** | Alle Zonen deines Cloudflare-Kontos und **alle DNS-Einträge** an einem Ort: A, AAAA, CNAME, TXT, MX, NS, SRV, CAA – anlegen, ändern, löschen, suchen, Cloudflare-Proxy (orange Wolke) ein/aus, TTL und Kommentare. |
 | **NetBird** | Dein ganzes NetBird-Netzwerk über die NetBird-API (Cloud oder selbst gehostet): **Geräte** (umbenennen, Gruppen, SSH, Ablauf der Anmeldung, entfernen), **Gruppen**, **Zugriffsregeln** (wer wen erreicht, Protokolle, Ports), **Netzwerke** (Ressourcen und Router), **DNS** (Nameserver, dazu ein Klick: *nrzNetwork als DNS für alle NetBird-Geräte*), **Setup-Keys** (mit fertigem `netbird up`-Befehl) und **Benutzer** (einladen, Rolle, sperren). Die Geräte-Seite zeigt NetBird-Namen automatisch. |
 | **Zugriffe (Monitor)** | Wer deine Websites hinter dem Reverse Proxy aufruft: Aufrufe, Besucher, Daten, Fehler, Verlauf, je Website, Top-Seiten, Herkunft (Cloudflare mit echter Adresse und Land, NetBird, LAN, Internet), Browser und Bots, Statuscodes, Besucher mit Geräte-/NetBird-Namen und Live-Ansicht. Aufbewahrung einstellbar. |
 | **Cloudflare Tunnel & NetBird eingebaut** | nrzNetwork lädt `cloudflared` und den NetBird-Client selbst (offizielle GitHub-Releases, SHA-256 geprüft), betreut und startet sie neu und spielt täglich zur gewählten Stunde Updates ein. Einträge des Reverse Proxys werden mit einem Schalter öffentlich: nrzNetwork setzt Tunnel-Regel und CNAME (fremde Regeln bleiben). NetBird läuft rootless im Netstack-Modus; ein Setup-Key lässt sich über die NetBird-API erzeugen. NetBirds eigener Reverse Proxy („Freigaben“) ist auf der NetBird-Seite verwaltbar. |
-| **Spy** | Was Angreifer aus öffentlichen Quellen über deine Domain erfahren: Namen und E-Mails in den Certificate-Transparency-Logs (crt.sh), Registrar und Kontakte (RDAP, sonst WHOIS), Nameserver- und Mail-Anbieter, SPF/DMARC/DKIM/CAA/DNSSEC, über TXT-Einträge verratene Dienste, der Hoster jeder Adresse, interne Adressen im öffentlichen DNS und Einträge, die auf deinen Anschluss zu Hause zeigen. Für eigene Domains auch aktiv (Webserver-Kopfzeilen, HSTS, offene Ports). Erkenntnisse nach Schwere mit Empfehlungen und Bewertung. |
+| **Spy** | Nur für eigene Domains (Cloudflare-Zonen, HTTPS-Namen): was Angreifer aus öffentlichen Quellen erfahren – Subdomains und E-Mails in den Certificate-Transparency-Logs, Registrar und Kontakte (RDAP/WHOIS), DNS-Einträge, Nameserver- und Mail-Anbieter, SPF/DMARC/DKIM/CAA/DNSSEC, über TXT verratene Dienste, der Hoster jeder Adresse, interne Adressen im öffentlichen DNS, Einträge auf den eigenen Anschluss, verwaiste CNAMEs (Übernahme von Subdomains), Cloudflare-Fehler – dazu aktiv Webserver (verratene Versionen, HSTS, Sicherheits-Kopfzeilen, öffentliche Verwaltungsseiten, nur HTTP) und **alle 65 535 Ports** jeder direkt erreichbaren Adresse und des eigenen Anschlusses. Jede Erkenntnis mit Schritt-für-Schritt-Anleitung und Sprung zur passenden Stelle in nrzNetwork. Täglicher Scan zur gewählten Stunde; der Verlauf hält 60 Berichte je Domain mit den Änderungen zum vorigen Scan. |
 | **HTTPS für eigene Domains** | Echtes Let's-Encrypt-Zertifikat (z. B. `zweers.ch` + `*.zweers.ch`) über die DNS-Prüfung mit einem **Cloudflare-API-Token** – von aussen muss nichts erreichbar sein, es klappt rein im lokalen Netz. Einträge öffnen sich dann als `https://music.zweers.ch` ohne Warnung, `http://` kann auf `https://` umleiten. Erneuert sich von selbst, wenn noch ein Drittel der Laufzeit übrig ist. HTTPS für Namen ohne eigenes Zertifikat (z. B. das eigene HTTPS von umbrelOS) wird anhand des Namens (SNI) unverändert durchgereicht. |
 | **Sperrseite** | Gesperrte Domains können auf nrzNetwork selbst zeigen (Sperrmodus *Sperrseite*, die Vorgabe): `http://`-Seiten zeigen „Diese Seite wurde durch nrzNetwork gesperrt“ mit Knöpfen zum **Freischalten auf Zeit** (15 Min., 1 Std., 4 Std. – einstellbar) und einem Formular, um eine **dauerhafte Freigabe zu beantragen**; der Admin genehmigt oder lehnt unter *Ausnahmen* ab. Freischaltungen enden von selbst. |
 | **Geräte & Netzwerk-Tools** | Jedes Gerät, das nrzNetwork fragt, mit Anfragen, Anteil gesperrt und zuletzt gesehen – Geräte bekommen Namen. **Ping** (ICMP, sonst TCP), **Port-Check**, **HTTP-Check** (Status, Zeit, Weiterleitungen, Header) und **Subnetz-Rechner**. |
@@ -49,7 +49,7 @@ Du brauchst Docker. Das Image enthält Programm und Oberfläche.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.7.0
+  ghcr.io/nicorenezweers/nrz-dns:1.8.0
 ```
 
 Das Image ist für mehrere Architekturen gebaut (`linux/amd64`, `linux/arm64`) und erscheint mit jedem [Release](https://github.com/nicorenezweers/nrzDNS/releases). Selbst bauen:
@@ -69,7 +69,7 @@ docker build -t nrzdns .
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.7.0   # oder: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.8.0   # oder: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -103,10 +103,10 @@ Der Container läuft als Benutzer `1000` ohne zusätzliche Rechte. Docker (ab 20
 Jedes [Release](https://github.com/nicorenezweers/nrzDNS/releases) enthält das Programm für Linux (`amd64`, `arm64`) als einzelne Datei, dazu `SHA256SUMS`. Die Wurzelzertifikate für DoT, DoH und das Laden der Sperrlisten bringt es selbst mit.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.7.0/nrzdns-1.7.0-linux-amd64
-chmod +x nrzdns-1.7.0-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.7.0-linux-amd64   # Port 53 ohne root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.7.0-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.8.0/nrzdns-1.8.0-linux-amd64
+chmod +x nrzdns-1.8.0-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.8.0-linux-amd64   # Port 53 ohne root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.8.0-linux-amd64
 ```
 
 Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen lassen, z. B. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, und mit `dig @127.0.0.1 -p 5353 example.com` fragen.
@@ -114,7 +114,7 @@ Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen la
 ### Beide Architekturen
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.7.0 --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.8.0 --push .
 ```
 
 Rust wird quer-kompiliert, nicht emuliert – der arm64-Build ist auf einem x86-Rechner also schnell und umgekehrt. Nur das Programm, gzip-komprimiert je Architektur (für die Umbrel-App): `scripts/store-binaries.sh <ordner>`.

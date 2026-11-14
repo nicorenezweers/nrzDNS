@@ -63,7 +63,7 @@ fn content_of(r: &Value) -> String {
 pub fn Domains() -> Element {
     let status = use_resource(|| async { api::get::<IntegrationsStatus>("/integrations").await });
     rsx! {
-        PageHeader { title: tr("Domains"), description: tr("Deine Domains bei Cloudflare: alle DNS-Einträge an einem Ort – anlegen, ändern, löschen, Proxy ein und aus.") }
+        PageHeader { title: tr("DNS-Einträge"), description: tr("Alle DNS-Einträge deiner Domains bei Cloudflare an einem Ort – anlegen, ändern, löschen, Proxy ein und aus.") }
         match &*status.read() {
             None => rsx! { Loading {} },
             Some(Err(e)) => rsx! { Callout { text: e.message.clone(), error: true } },

@@ -79,7 +79,7 @@ fn Form(status: IntegrationsStatus, version: Signal<u64>) -> Element {
     };
     rsx! {
         form { class: "grid grid-cols-1 gap-6", onsubmit: save,
-            Section { title: tr("Cloudflare"), description: tr("Für die Seite Domains (alle DNS-Einträge deiner Domains) und die HTTPS-Zertifikate."),
+            Section { title: tr("Cloudflare"), description: tr("Für die Seite DNS-Einträge (alle Einträge deiner Domains), die HTTPS-Zertifikate, den Tunnel und Spy."),
                 div { class: "grid grid-cols-1 gap-4",
                     State { st: status.cloudflare.clone() }
                     Field { label: tr("API-Token"), hint: tr("Cloudflare → Profil → API-Tokens → Token erstellen → Vorlage „Zone-DNS bearbeiten“ → Zonenressourcen: alle Zonen (oder deine Domain). Rechte: Zone → DNS → Bearbeiten, Zone → Zone → Lesen."),

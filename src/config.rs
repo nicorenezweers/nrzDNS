@@ -57,7 +57,7 @@ pub struct Config {
     pub spy_crtsh: String,
     /// Spy: RDAP-Weiterleitung (Domains und IP-Netze).
     pub spy_rdap: String,
-    /// Spy: liefert die öffentliche Adresse dieses Anschlusses (`ip=…`).
+    /// Spy: liefert die öffentliche IPv4-Adresse dieses Anschlusses (`ip=…`).
     pub spy_trace: String,
     /// Neue Benutzer dürfen sich selbst registrieren, solange der Admin nichts anderes
     /// einstellt (das erste Konto immer).
@@ -90,7 +90,7 @@ impl Default for Config {
             spy_doh: "https://cloudflare-dns.com/dns-query".into(),
             spy_crtsh: "https://crt.sh".into(),
             spy_rdap: "https://rdap.org".into(),
-            spy_trace: "https://www.cloudflare.com/cdn-cgi/trace".into(),
+            spy_trace: "https://1.1.1.1/cdn-cgi/trace".into(),
             registration_open: false,
             cookie_secure: false,
             background: true,
