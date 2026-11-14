@@ -32,7 +32,8 @@ nrzNetwork beantwortet die DNS-Anfragen deines ganzen Netzes mit einem kleinen P
 | **Zugriffe (Monitor)** | Wer deine Websites hinter dem Reverse Proxy aufruft: Aufrufe, Besucher, Daten, Fehler, Verlauf, je Website, Top-Seiten, Herkunft (Cloudflare mit echter Adresse und Land, NetBird, LAN, Internet), Browser und Bots, Statuscodes, Besucher mit Geräte-/NetBird-Namen und Live-Ansicht. Aufbewahrung einstellbar. |
 | **Cloudflare Tunnel & NetBird eingebaut** | nrzNetwork lädt `cloudflared` und den NetBird-Client selbst (offizielle GitHub-Releases, SHA-256 geprüft), betreut und startet sie neu und spielt täglich zur gewählten Stunde Updates ein. Einträge des Reverse Proxys werden mit einem Schalter öffentlich: nrzNetwork setzt Tunnel-Regel und CNAME (fremde Regeln bleiben). NetBird läuft rootless im Netstack-Modus; ein Setup-Key lässt sich über die NetBird-API erzeugen. NetBirds eigener Reverse Proxy („Freigaben“) ist auf der NetBird-Seite verwaltbar. |
 | **Dieter (KI-Assistent)** | Ein KI-Assistent für das ganze Netz über **OpenRouter**, **Grok (xAI)** oder die **Claude CLI** (von nrzNetwork geladen und geprüft). Er nutzt die ganze API von nrzNetwork (Zonen, DNS-Einträge bei Cloudflare, Reverse Proxy, Sperren, NetBird, Tunnel, Komponenten, Spy, Zugriffe) und DNS-Abfragen – nur lesend oder, wenn erlaubt, auch ändernd (Konten, Zugangsdaten und seine eigenen Einstellungen ausgenommen; jede Änderung im Protokoll). Die Überwachung prüft DNS-Weiterleitung, SERVFAIL-Anteil, Tunnel/NetBird, Proxy-Ziele, Serverfehler, Zertifikat und Spy; bei einem neuen Problem springt Dieter automatisch ein und berichtet, was er gefunden und behoben hat. Er sitzt als **Chat-Fenster unten rechts auf jeder Seite** (kennt die aktuelle Seite, Vorschläge, Antworten mit Markdown, aufklappbare Schritte, Abzeichen für offene Probleme); eingerichtet wird er unter Einstellungen → Dieter. |
-| **Netzwerkkarte** | Ein Canvas mit allen Verbindungen als Linien: das **Internet** (öffentliche Domains), die Zugänge (**Cloudflare Tunnel**, **NetBird**-Reverse-Proxy, **Router** mit offenen Ports aus dem Spy, lokales DNS), die **Reverse-Proxy**-Einträge von nrzNetwork und die Ziele im **Docker**-Netz (Container mit internen IPs, Umbrel-App-Proxys → Apps), **zu Hause (LAN)** und im **NetBird-Netz** (Geräte online/offline). Beim Darüberfahren leuchtet der ganze Weg auf (z. B. Domain → Tunnel → Proxy → Container), die Linienstärke zeigt die Zugriffe der letzten 24 h, gestrichelt = Weg gerade unterbrochen; Klick zeigt Details. Oben im Dashboard und als eigene Seite, mit Zoom und Vollbild. |
+| **Netzwerkkarte** | Ein Canvas mit allen Verbindungen als Linien: das **Internet** (öffentliche Domains), die Zugänge (**Cloudflare Tunnel**, **NetBird**-Reverse-Proxy, **Router** mit offenen Ports aus dem Spy, lokales DNS), die **Reverse-Proxy**-Einträge von nrzNetwork und die Ziele im **Docker**-Netz (Container mit internen IPs, Umbrel-App-Proxys → Apps), **zu Hause (LAN)** und im **NetBird-Netz** (Geräte online/offline). Beim Darüberfahren leuchtet der ganze Weg auf (z. B. Domain → Tunnel → Proxy → Container), die Linienstärke zeigt die Zugriffe der letzten 24 h, gestrichelt = Weg gerade unterbrochen; Klick zeigt Details. Oben im Dashboard und als eigene Seite, mit Zoom und Vollbild. Cloudflare wird direkt gelesen: alle DNS-Einträge (über Cloudflare oder direkt), **alle Tunnel**, auf die Einträge zeigen – auch solche, die nrzNetwork nicht verwaltet – mit Status, Connector-IP, Rechenzentren und Ingress-Zielen (braucht beim Token das Recht *Konto → Cloudflare Tunnel → Lesen*), und `cloudflared`-Container auf dem Gerät mit ihrem Tunnel. |
+| **Streamer-Modus** | Zum Streamen oder Bildschirm teilen: Taste `b` oder im Profilmenü. IP-Adressen, Domains, E-Mails, UUIDs, MAC-Adressen und Schlüssel werden überall geschwärzt, Namen, Eingabefelder, technische (Monospace-)Angaben, Logs und die Netzwerkkarte unscharf, Tooltips ausgeblendet. Schon vor dem Laden aktiv, im Browser gespeichert, ein rotes „Streamer“-Abzeichen zeigt ihn an. |
 | **Docker** | Lesende Sicht auf den ganzen Docker-Host wie `docker ps`: jeder Container mit Name, App, Zustand, **internen IPs je Netz**, Ports und Image, alle Docker-Netze mit Subnetz/Gateway und Mitgliedern, und die letzten Log-Zeilen je Container. Container-Namen erscheinen auch im Zugriffs-Monitor, und Dieter kann alles nutzen. Braucht `/var/run/docker.sock` (nur lesend eingebunden). |
 | **Zwei-Faktor-Anmeldung (2FA)** | TOTP mit jeder Authenticator-App (QR-Code), 10 einmalige Wiederherstellungscodes, Codes nicht wiederverwendbar, falsche Codes zählen zur Anmeldesperre; Admins können 2FA eines Benutzers zurücksetzen. |
 | **Spy** | Nur für eigene Domains (Cloudflare-Zonen, HTTPS-Namen): was Angreifer aus öffentlichen Quellen erfahren – Subdomains und E-Mails in den Certificate-Transparency-Logs, Registrar und Kontakte (RDAP/WHOIS), DNS-Einträge, Nameserver- und Mail-Anbieter, SPF/DMARC/DKIM/CAA/DNSSEC, über TXT verratene Dienste, der Hoster jeder Adresse, interne Adressen im öffentlichen DNS, Einträge auf den eigenen Anschluss, verwaiste CNAMEs (Übernahme von Subdomains), Cloudflare-Fehler – dazu aktiv Webserver (verratene Versionen, HSTS, Sicherheits-Kopfzeilen, öffentliche Verwaltungsseiten, nur HTTP) und **alle 65 535 Ports** jeder direkt erreichbaren Adresse und des eigenen Anschlusses. Jede Erkenntnis mit Schritt-für-Schritt-Anleitung und Sprung zur passenden Stelle in nrzNetwork. Täglicher Scan zur gewählten Stunde; der Verlauf hält 60 Berichte je Domain mit den Änderungen zum vorigen Scan. |
@@ -53,7 +54,7 @@ Du brauchst Docker. Das Image enthält Programm und Oberfläche.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.12.0
+  ghcr.io/nicorenezweers/nrz-dns:1.13.0
 ```
 
 Das Image ist für mehrere Architekturen gebaut (`linux/amd64`, `linux/arm64`) und erscheint mit jedem [Release](https://github.com/nicorenezweers/nrzDNS/releases). Selbst bauen:
@@ -73,7 +74,7 @@ docker build -t nrzdns .
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.12.0   # oder: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.13.0   # oder: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -107,10 +108,10 @@ Der Container läuft als Benutzer `1000` ohne zusätzliche Rechte. Docker (ab 20
 Jedes [Release](https://github.com/nicorenezweers/nrzDNS/releases) enthält das Programm für Linux (`amd64`, `arm64`) als einzelne Datei, dazu `SHA256SUMS`. Die Wurzelzertifikate für DoT, DoH und das Laden der Sperrlisten bringt es selbst mit.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.12.0/nrzdns-1.12.0-linux-amd64
-chmod +x nrzdns-1.12.0-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.12.0-linux-amd64   # Port 53 ohne root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.12.0-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.13.0/nrzdns-1.13.0-linux-amd64
+chmod +x nrzdns-1.13.0-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.13.0-linux-amd64   # Port 53 ohne root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.13.0-linux-amd64
 ```
 
 Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen lassen, z. B. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, und mit `dig @127.0.0.1 -p 5353 example.com` fragen.
@@ -118,7 +119,7 @@ Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen la
 ### Beide Architekturen
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.12.0 --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.13.0 --push .
 ```
 
 Rust wird quer-kompiliert, nicht emuliert – der arm64-Build ist auf einem x86-Rechner also schnell und umgekehrt. Nur das Programm, gzip-komprimiert je Architektur (für die Umbrel-App): `scripts/store-binaries.sh <ordner>`.

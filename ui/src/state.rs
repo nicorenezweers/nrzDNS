@@ -11,6 +11,25 @@ pub static ME: GlobalSignal<Option<User>> = Signal::global(|| None);
 /// Seitenleiste auf dem Handy geöffnet.
 pub static SIDEBAR_OPEN: GlobalSignal<bool> = Signal::global(|| false);
 
+/// Streamer-Modus: sensible Angaben geschwärzt/unscharf (gespeichert im Browser).
+pub static STREAMER: GlobalSignal<bool> = Signal::global(|| {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item("nrz-streamer").ok().flatten())
+        .is_some_and(|v| v == "1")
+});
+
+/// Streamer-Modus ein- oder ausschalten.
+pub fn set_streamer(on: bool) {
+    *STREAMER.write() = on;
+    document::eval(&format!("window.nrzStreamer && window.nrzStreamer.set({on})"));
+    crate::components::overlay::toast(if on {
+        crate::i18n::tr("Streamer-Modus an – sensible Angaben sind verborgen.")
+    } else {
+        crate::i18n::tr("Streamer-Modus aus.")
+    });
+}
+
 /// Vorlagen vom Server (einmal geladen).
 static PRESETS: GlobalSignal<Option<Presets>> = Signal::global(|| None);
 

@@ -33,6 +33,8 @@ fn area_info(key: &str) -> (String, &'static str, usize) {
 fn link_color(kind: &str) -> &'static str {
     match kind {
         "tunnel" => "#f38020",
+        "cfproxy" => "#fbad41",
+        "direct" => "#94a3b8",
         "netbird" | "mesh" => "#6366f1",
         "router" => "#ef4444",
         "lan" | "dns" => "#10b981",
@@ -83,16 +85,21 @@ fn order(n: &TopoNode, linked_to: &HashMap<&str, &str>) -> (u8, String) {
     let rank = match (n.area.as_str(), n.kind.as_str()) {
         ("internet", "external") => 9,
         ("internet", _) => match linked_to.get(n.id.as_str()).copied().unwrap_or("") {
-            "gw:tunnel" => 0,
-            "gw:nbproxy" => 1,
-            "gw:router" => 2,
-            _ => 3,
+            "gw:cloudflare" => 0,
+            t if t.starts_with("gw:cft:") => 1,
+            "gw:tunnel" => 2,
+            "gw:nbproxy" => 3,
+            "gw:router" => 4,
+            t if t.starts_with("dom:") => 5,
+            _ => 6,
         },
-        ("gateway", "tunnel") => 0,
-        ("gateway", "netbird") if n.id == "gw:nbproxy" => 1,
-        ("gateway", "router") => 2,
-        ("gateway", "netbird") => 3,
-        ("gateway", _) => 4,
+        ("gateway", "cloudflare") => 0,
+        ("gateway", "tunnel") if n.id != "gw:tunnel" => 1,
+        ("gateway", "tunnel") => 2,
+        ("gateway", "netbird") if n.id == "gw:nbproxy" => 3,
+        ("gateway", "router") => 4,
+        ("gateway", "netbird") => 5,
+        ("gateway", _) => 6,
         ("nrz", "hub") => 0,
         ("lan", "host") => 0,
         ("netbird", _) if n.status != "ok" => 2,
@@ -264,6 +271,7 @@ pub fn NetworkMap(compact: bool) -> Element {
     let mut full = use_signal(|| false);
     let mut hover = use_signal(|| None::<String>);
     let mut selected = use_signal(|| None::<String>);
+    let streamer = crate::state::STREAMER();
 
     let read = data.read();
     let t = match &*read {
@@ -306,7 +314,7 @@ pub fn NetworkMap(compact: bool) -> Element {
         div { class: wrap,
             div { class: "flex flex-wrap items-center gap-2",
                 div { class: "flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground",
-                    for (label , color) in [(tr("Cloudflare Tunnel"), "#f38020"), (tr("NetBird"), "#6366f1"), (tr("Router / offene Ports"), "#ef4444"), (tr("Reverse Proxy"), "#8b5cf6"), (tr("Zuhause / DNS"), "#10b981"), (tr("Docker"), "#2496ed")] {
+                    for (label , color) in [(tr("Cloudflare Tunnel"), "#f38020"), (tr("Cloudflare Proxy"), "#fbad41"), (tr("Direkt (DNS)"), "#94a3b8"), (tr("NetBird"), "#6366f1"), (tr("Router / offene Ports"), "#ef4444"), (tr("Reverse Proxy"), "#8b5cf6"), (tr("Zuhause / DNS"), "#10b981"), (tr("Docker"), "#2496ed")] {
                         span { key: "{label}", class: "flex items-center gap-1.5",
                             span { class: "inline-block h-0.5 w-5 rounded", style: "background: {color}" }
                             "{label}"
@@ -352,7 +360,7 @@ pub fn NetworkMap(compact: bool) -> Element {
                                 style: "fill: {a.color}; fill-opacity: 0.06; stroke: {a.color}; stroke-opacity: 0.35; stroke-width: 1; stroke-dasharray: 5 4" }
                             text { x: "{a.x + 14.0}", y: "{a.y + 21.0}", style: "fill: {a.color}; font-size: 12px; font-weight: 600; letter-spacing: 0.04em", "{a.title.to_uppercase()}" }
                             for (g , gy) in a.groups.iter().cloned() {
-                                text { key: "{g}", x: "{a.x + 16.0}", y: "{gy}", class: "fill-muted-foreground", style: "font-size: 10.5px; font-family: ui-monospace, monospace", "{g}" }
+                                text { key: "{g}", x: "{a.x + 16.0}", y: "{gy}", class: "sensitive fill-muted-foreground", style: "font-size: 10.5px; font-family: ui-monospace, monospace", "{g}" }
                             }
                             if let Some((n , my)) = a.more {
                                 text { x: "{a.x + 16.0}", y: "{my}", style: "fill: {a.color}; font-size: 11px; cursor: pointer; text-decoration: underline",
@@ -378,10 +386,10 @@ pub fn NetworkMap(compact: bool) -> Element {
                             rsx! {
                                 g { key: "{i}",
                                     path { d: "{dr.d}", class: anim, style: "fill: none; stroke: {color}; stroke-width: {width}; stroke-opacity: {opacity}; stroke-dasharray: {dash}; stroke-linecap: round",
-                                        title { "{tip}" }
+                                        if !streamer { title { "{tip}" } }
                                     }
                                     if show_label {
-                                        text { x: "{mx}", y: "{my - 4.0}", class: "fill-foreground", style: "font-size: 10px; text-anchor: middle; paint-order: stroke; stroke: var(--card); stroke-width: 3px; font-family: ui-monospace, monospace", "{l.label}" }
+                                        text { x: "{mx}", y: "{my - 4.0}", class: "sensitive fill-foreground", style: "font-size: 10px; text-anchor: middle; paint-order: stroke; stroke: var(--card); stroke-width: 3px; font-family: ui-monospace, monospace", "{l.label}" }
                                     }
                                 }
                             }
@@ -415,9 +423,9 @@ pub fn NetworkMap(compact: bool) -> Element {
                                         rect { x: "{x}", y: "{y}", width: "4", height: "{NODE_H}", rx: "2", style: "fill: {color}" }
                                     }
                                     circle { cx: "{x + 14.0}", cy: "{y + NODE_H / 2.0}", r: "4", style: "fill: {status_color(&n)}" }
-                                    text { x: "{x + 26.0}", y: "{y + 17.0}", class: "fill-foreground", style: "font-size: 12px; font-weight: {weight}", "{label}" }
-                                    text { x: "{x + 26.0}", y: "{y + 31.0}", class: "fill-muted-foreground", style: "font-size: 10.5px; font-family: ui-monospace, monospace", "{sub}" }
-                                    title { "{n.label}\n{n.sub}" }
+                                    text { x: "{x + 26.0}", y: "{y + 17.0}", class: "sensitive fill-foreground", style: "font-size: 12px; font-weight: {weight}", "{label}" }
+                                    text { x: "{x + 26.0}", y: "{y + 31.0}", class: "sensitive fill-muted-foreground", style: "font-size: 10.5px; font-family: ui-monospace, monospace", "{sub}" }
+                                    if !streamer { title { "{n.label}\n{n.sub}" } }
                                 }
                             }
                         }
@@ -443,7 +451,7 @@ fn Details(node: TopoNode, topo: Topology, on_close: EventHandler<()>, on_pick: 
         "container" => Some((Route::Docker {}, tr("Zu Docker"))),
         "peer" | "netbird" => Some((Route::Netbird {}, tr("Zu NetBird"))),
         "proxy" | "hub" => Some((Route::Proxy {}, tr("Zum Reverse Proxy"))),
-        "domain" => Some((Route::Domains {}, tr("Zu den DNS-Einträgen"))),
+        "domain" | "cloudflare" => Some((Route::Domains {}, tr("Zu den DNS-Einträgen"))),
         "device" => Some((Route::Devices {}, tr("Zu den Geräten"))),
         "tunnel" => Some((Route::Settings { section: "components".into() }, tr("Zu den Komponenten"))),
         "router" => Some((Route::Spy {}, tr("Zum Spy"))),
@@ -461,7 +469,7 @@ fn Details(node: TopoNode, topo: Topology, on_close: EventHandler<()>, on_pick: 
                 onclick: move |_| on_pick.call(other_id.clone()),
                 span { class: "inline-block h-0.5 w-4 shrink-0 rounded", style: "background: {col}; opacity: {lop}" }
                 span { class: "text-muted-foreground", "{arrow}" }
-                span { class: "min-w-0 flex-1 truncate font-medium", "{name}" }
+                span { class: "sensitive min-w-0 flex-1 truncate font-medium", "{name}" }
                 if !label.is_empty() { span { class: "font-mono text-muted-foreground", "{label}" } }
                 if hits > 0 { span { class: "text-muted-foreground", {trf("{0}/24 h", &[&hits.to_string()])} } }
             }
@@ -472,7 +480,7 @@ fn Details(node: TopoNode, topo: Topology, on_close: EventHandler<()>, on_pick: 
             div { class: "flex items-start gap-3",
                 span { class: "mt-1 inline-block size-2.5 shrink-0 rounded-full", style: "background: {status_color(&node)}" }
                 div { class: "min-w-0 flex-1",
-                    p { class: "font-semibold break-all", "{node.label}" }
+                    p { class: "sensitive font-semibold break-all", "{node.label}" }
                     p { class: "text-xs text-muted-foreground",
                         span { style: "color: {color}", "{area}" }
                         if !node.sub.is_empty() { " · " span { class: "font-mono", "{node.sub}" } }
@@ -485,7 +493,7 @@ fn Details(node: TopoNode, topo: Topology, on_close: EventHandler<()>, on_pick: 
             }
             if !node.info.is_empty() {
                 div { class: "grid gap-0.5 text-xs",
-                    for (i , line) in node.info.iter().enumerate() { p { key: "{i}", class: "break-all text-muted-foreground", "{line}" } }
+                    for (i , line) in node.info.iter().enumerate() { p { key: "{i}", class: "sensitive break-all text-muted-foreground", "{line}" } }
                 }
             }
             div { class: "grid grid-cols-1 gap-3 md:grid-cols-2",

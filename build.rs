@@ -12,7 +12,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Dateien aus `static/` mit diesen Endungen kommen ins Programm.
-const STATIC_EXTENSIONS: &[&str] = &["woff2", "woff", "png", "svg", "ico", "webp"];
+const STATIC_EXTENSIONS: &[&str] = &["woff2", "woff", "png", "svg", "ico", "webp", "js"];
 /// Grössere Dateien in `static/` bleiben draussen (Screenshots o. ä. gehören nicht ins Programm).
 const STATIC_MAX_BYTES: u64 = 2 * 1024 * 1024;
 

@@ -36,7 +36,7 @@ pub fn Account() -> Element {
             div { class: "grid grid-cols-1 max-w-xl gap-5",
                 dl { class: "grid grid-cols-[8rem_1fr] gap-y-2 text-sm",
                     dt { class: "text-muted-foreground", {tr("Benutzername")} }
-                    dd { class: "font-medium", "{me.username}" }
+                    dd { class: "sensitive font-medium", "{me.username}" }
                     dt { class: "text-muted-foreground", {tr("Rolle")} }
                     dd { if me.is_admin() { {tr("Administrator")} } else { {tr("Mitglied")} } }
                     dt { class: "text-muted-foreground", {tr("Dabei seit")} }
@@ -287,7 +287,7 @@ fn TwoFactor() -> Element {
                     }
                 } else if let Some(s) = setup() {
                     div { class: "grid gap-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-start",
-                        div { class: "rounded-lg bg-white p-2", dangerous_inner_html: "{s.qr_svg}" }
+                        div { class: "sensitive rounded-lg bg-white p-2", dangerous_inner_html: "{s.qr_svg}" }
                         div { class: "grid gap-3 text-sm",
                             p { {tr("1. Den QR-Code mit deiner Authenticator-App scannen – oder den Schlüssel abtippen:")} }
                             div { class: "flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1 font-mono text-xs break-all", span { class: "flex-1", "{s.secret}" } CopyButton { text: s.secret.clone() } }

@@ -93,7 +93,7 @@ pub fn Devices() -> Element {
                                                 if d.name.is_empty() && d.netbird_name.is_empty() {
                                                     span { class: "font-mono text-[13px]", "{d.ip}" }
                                                 } else {
-                                                    p { class: "font-medium",
+                                                    p { class: "sensitive font-medium",
                                                         if d.name.is_empty() { "{d.netbird_name}" } else { "{d.name}" }
                                                         if !d.netbird_name.is_empty() {
                                                             span { class: "ml-1.5 inline-flex items-center gap-1 rounded-full border px-1.5 text-[11px] font-normal text-muted-foreground", title: tr("Name in NetBird"),

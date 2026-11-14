@@ -110,6 +110,16 @@
 }
 .flow-line { animation: flow 1.1s linear infinite; }
 
+/* Streamer-Modus (siehe index.html) */
+::highlight(nrz-redact) { color: transparent; background-color: oklch(0.55 0 0); }
+html.streamer .sensitive,
+html.streamer .font-mono,
+html.streamer input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=button]):not([type=submit]),
+html.streamer textarea,
+html.streamer select,
+html.streamer pre,
+html.streamer code { filter: blur(6px); }
+
 @media (prefers-reduced-motion: reduce) {
   .flow-line { animation: none; }
   .animate-toast-in, .animate-toast-out, .animate-in, .animate-fade-in, .animate-slide-in { animation-duration: 1ms; }

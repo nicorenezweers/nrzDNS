@@ -44,6 +44,7 @@ window.__nrzdnsKeys = (e) => {
         return;
     }
     if (k === '?') { e.preventDefault(); dioxus.send('?'); return; }
+    if (k === 'b' && !(pending && Date.now() - pending < 1500)) { e.preventDefault(); dioxus.send('b'); return; }
     if (pending && Date.now() - pending < 1500 && k.length === 1) {
         pending = 0;
         e.preventDefault();
@@ -64,6 +65,9 @@ pub fn use_shortcuts() {
             if k == "?" {
                 let open = *SHORTCUTS_OPEN.peek();
                 *SHORTCUTS_OPEN.write() = !open;
+            } else if k == "b" {
+                let on = *crate::state::STREAMER.peek();
+                crate::state::set_streamer(!on);
             } else if let Some(route) = k
                 .strip_prefix('g')
                 .and_then(|c| c.chars().next())
@@ -77,7 +81,7 @@ pub fn use_shortcuts() {
 
 #[component]
 pub fn ShortcutsHelp() -> Element {
-    let rows: [(&[&str], String); 10] = [
+    let rows: [(&[&str], String); 11] = [
         (&["g", "d"], tr("Dashboard")),
         (&["g", "z"], tr("Zonen")),
         (&["g", "s"], tr("Sperren")),
@@ -87,6 +91,7 @@ pub fn ShortcutsHelp() -> Element {
         (&["g", "r"], tr("DNS-Client")),
         (&["g", "e"], tr("Einstellungen")),
         (&["/"], tr("Ins Suchfeld der Seite")),
+        (&["b"], tr("Streamer-Modus ein/aus")),
         (&["?"], tr("Diese Übersicht")),
     ];
     rsx! {

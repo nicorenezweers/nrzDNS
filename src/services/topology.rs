@@ -397,9 +397,186 @@ pub async fn build(pool: &SqlitePool, config: &Config, comps: &Components) -> To
         }
     }
 
+    // ---------- Cloudflare: DNS-Einträge, Proxy (orange Wolke) und alle Tunnel ----------
+    let own_tunnel = cstatus.as_ref().map(|s| s.tunnel_id.to_ascii_lowercase()).unwrap_or_default();
+    let home_ip: String = reports.iter().map(|r| r.home_ip.clone()).find(|h| !h.is_empty()).unwrap_or_default();
+    let tunnel_node = |id: &str| if !own_tunnel.is_empty() && id == own_tunnel { "gw:tunnel".to_string() } else { format!("gw:cft:{id}") };
+    let cf = cloudflare_view(pool, config).await;
+    // cloudflared-Container auf diesem Gerät und ihre Tunnel
+    let mut connectors: HashMap<String, Vec<&DockerContainer>> = HashMap::new();
+    let mut unknown_connectors: Vec<&DockerContainer> = Vec::new();
+    for c in containers.iter().filter(|c| c.image.contains("cloudflared") || c.name.contains("cloudflared")) {
+        let ids = docker::tunnel_ids(config, &c.name).await;
+        if ids.is_empty() {
+            unknown_connectors.push(c);
+        }
+        for id in ids {
+            connectors.entry(id).or_default().push(c);
+        }
+    }
+    let mut tunnel_ids: Vec<String> = cf.tunnels.keys().cloned().collect();
+    for id in connectors.keys() {
+        if !tunnel_ids.contains(id) {
+            tunnel_ids.push(id.clone());
+        }
+    }
+    tunnel_ids.sort();
+    if !cf.records.is_empty() {
+        let mut node = n("gw:cloudflare", "gateway", "cloudflare", "Cloudflare", "DNS · Proxy · Tunnel");
+        node.status = "ok".into();
+        node.info.push(format!("Zonen: {}", cf.zones.join(", ")));
+        node.info.push("Orange Wolke = Anfragen laufen über Cloudflare (Herkunft verborgen).".into());
+        m.node(node);
+    }
+    for id in &tunnel_ids {
+        let info = cf.tunnels.get(id).cloned().unwrap_or_default();
+        let nid = tunnel_node(id);
+        let healthy = info.status == "healthy";
+        if nid == "gw:tunnel" {
+            if let Some(node) = m.nodes.iter_mut().find(|x| x.id == nid) {
+                if !info.name.is_empty() {
+                    node.sub = format!("{} · {}", info.name, node.sub);
+                }
+                node.info.extend(info.lines.iter().cloned());
+            }
+        } else {
+            let label = if info.name.is_empty() { "Cloudflare Tunnel".to_string() } else { format!("Tunnel {}", info.name) };
+            let sub = match info.status.as_str() {
+                "healthy" => format!("verbunden · {} Verbindungen", info.connections),
+                "degraded" => "eingeschränkt".to_string(),
+                "down" => "getrennt".to_string(),
+                "inactive" => "nie verbunden".to_string(),
+                "" => "Status unbekannt".to_string(),
+                other => other.to_string(),
+            };
+            let mut node = n(&nid, "gateway", "tunnel", label, sub);
+            node.status = match info.status.as_str() {
+                "healthy" => "ok".into(),
+                "degraded" | "" => "warn".into(),
+                _ => "off".into(),
+            };
+            node.info.push(format!("Tunnel-ID {id}"));
+            node.info.push("Nicht von nrzNetwork verwaltet.".into());
+            node.info.extend(info.lines.iter().cloned());
+            m.node(node);
+        }
+        // Wo cloudflared läuft
+        let mut on_device_connector = false;
+        for c in connectors.get(id).into_iter().flatten() {
+            used_ct.insert(c.name.clone());
+            m.node(container_node(c));
+            m.link(&nid, &format!("ct:{}", c.name), "tunnel", "Connector", healthy || info.status.is_empty(), 0, "");
+            on_device_connector |= c.network_mode == "host";
+        }
+        let at_home = !home_ip.is_empty() && info.origins.contains(&home_ip);
+        if !connectors.contains_key(id) && !info.origins.is_empty() && nid != "gw:tunnel" {
+            let cid = format!("cfc:{id}");
+            let mut node = n(&cid, if at_home { "lan" } else { "internet" }, "host", "cloudflared-Connector", info.origins.join(", "));
+            node.status = st(healthy, !info.status.is_empty());
+            node.info.push(if at_home { "Läuft bei dir zu Hause (gleiche öffentliche IP), aber nicht als Container auf diesem Gerät.".into() } else { "Läuft ausserhalb deines Heimnetzes.".into() });
+            m.node(node);
+            if !info.ingress.iter().any(|(_, svc)| {
+                let h = split_target(svc).0;
+                h == "localhost" || h.starts_with("127.")
+            }) {
+                m.link(&nid, &cid, "tunnel", "Connector", healthy, 0, "");
+            }
+        }
+        // Ziele des Tunnels (Ingress)
+        if nid != "gw:tunnel" {
+            for (host, service) in &info.ingress {
+                let (thost, tport) = split_target(service);
+                if thost.is_empty() || service.starts_with("http_status") {
+                    continue;
+                }
+                let local = thost == "localhost" || thost.starts_with("127.");
+                let to = if local && !on_device_connector && !connectors.contains_key(id) && m.has(&format!("cfc:{id}")) {
+                    format!("cfc:{id}")
+                } else {
+                    target_of(&mut m, &mut used_ct, &thost, tport)
+                };
+                let hc = hits.get(host).copied().unwrap_or(0);
+                m.link(&nid, &to, "tunnel", &format!(":{tport}"), healthy, hc, host);
+            }
+        }
+    }
+    for r in &cf.records {
+        let dom = format!("dom:{}", r.name);
+        let hc = hits.get(&r.name).copied().unwrap_or(0);
+        let ensure = |m: &mut Map, sub: &str| {
+            if !m.has(&dom) {
+                let mut dn = n(&dom, "internet", "domain", &r.name, sub);
+                dn.status = "ok".into();
+                m.node(dn);
+            }
+            if let Some(node) = m.nodes.iter_mut().find(|x| x.id == dom) {
+                let line = format!("DNS: {} → {}{}", r.kind, r.content, if r.proxied { " (über Cloudflare)" } else { "" });
+                if !node.info.contains(&line) {
+                    node.info.push(line);
+                }
+            }
+        };
+        if let Some(id) = r.content.strip_suffix(".cfargotunnel.com") {
+            let id = id.to_ascii_lowercase();
+            ensure(&mut m, "Cloudflare Tunnel");
+            let nid = tunnel_node(&id);
+            let ok = nid == "gw:tunnel" && tunnel_ok || cf.tunnels.get(&id).is_some_and(|t| t.status == "healthy");
+            if !m.has(&nid) {
+                let mut node = n(&nid, "gateway", "tunnel", "Cloudflare Tunnel", "unbekannter Tunnel");
+                node.status = "warn".into();
+                node.info.push(format!("Tunnel-ID {id}"));
+                m.node(node);
+            }
+            m.link(&dom, &nid, "tunnel", "", ok, hc, &r.name);
+            if let Some(dn) = m.nodes.iter_mut().find(|x| x.id == dom) {
+                dn.status = st(ok, true);
+            }
+            // Tunnel ohne lesbares Ingress: Domain zeigt auf den Tunnel, Ziel unbekannt
+            continue;
+        }
+        match r.kind.as_str() {
+            "A" | "AAAA" => {
+                let Ok(ip) = r.content.parse::<IpAddr>() else { continue };
+                let home = r.content == home_ip;
+                ensure(&mut m, if r.proxied { "über Cloudflare" } else if home { "direkt auf Heim-IP" } else { "direkt" });
+                let origin = if home {
+                    if !m.has("gw:router") {
+                        let mut node = n("gw:router", "gateway", "router", "Router (Heim-IP)", home_ip.clone());
+                        node.status = "ok".into();
+                        m.node(node);
+                    }
+                    "gw:router".to_string()
+                } else if is_private(ip) || device_set.contains(&ip) {
+                    target_of(&mut m, &mut used_ct, &r.content, 80)
+                } else {
+                    let id = format!("ext:{ip}");
+                    m.node(n(&id, "internet", "external", ip.to_string(), "Server ausserhalb"));
+                    id
+                };
+                if r.proxied {
+                    m.link(&dom, "gw:cloudflare", "cfproxy", "", true, hc, &r.name);
+                    m.link("gw:cloudflare", &origin, "cfproxy", "", true, hc, &r.name);
+                } else {
+                    m.link(&dom, &origin, if home { "router" } else { "direct" }, &r.kind, true, hc, &r.name);
+                }
+            }
+            "CNAME" => {
+                // Alias auf eine eigene Domain (z. B. www → zweers.ch)
+                let target = r.content.trim_end_matches('.').to_ascii_lowercase();
+                if cf.records.iter().any(|o| o.name == target) {
+                    ensure(&mut m, if r.proxied { "Alias über Cloudflare" } else { "Alias" });
+                    let tid = format!("dom:{target}");
+                    m.link(&dom, &tid, "direct", "CNAME", true, hc, &r.name);
+                }
+            }
+            _ => {}
+        }
+    }
+    notes.extend(cf.notes.iter().cloned());
+
     // ---------- Was Spy von aussen sieht (Router, Tunnel-CNAMEs) ----------
     let mut router_ports: Vec<u16> = Vec::new();
-    let mut home_ip = String::new();
+    let mut home_ip = home_ip;
     for r in &reports {
         let homes: HashMap<&str, &Vec<u16>> = r.addresses.iter().filter(|a| a.home).map(|a| (a.ip.as_str(), &a.open_ports)).collect();
         for a in r.addresses.iter().filter(|a| a.home) {
@@ -422,8 +599,13 @@ pub async fn build(pool: &SqlitePool, config: &Config, comps: &Components) -> To
                 m.node(dn);
             }
             let hc = hits.get(&h.name).copied().unwrap_or(0);
-            if tunnel_cname && m.has("gw:tunnel") {
-                m.link(&dom, "gw:tunnel", "tunnel", "", tunnel_ok, hc, &h.name);
+            if tunnel_cname {
+                let id = h.cname.split('.').next().unwrap_or_default().to_ascii_lowercase();
+                let nid = tunnel_node(&id);
+                if m.has(&nid) {
+                    let ok = nid == "gw:tunnel" && tunnel_ok || cf.tunnels.get(&id).is_some_and(|t| t.status == "healthy");
+                    m.link(&dom, &nid, "tunnel", "", ok, hc, &h.name);
+                }
             }
             if !via_home.is_empty() {
                 let mut ports = via_home.clone();
@@ -526,7 +708,7 @@ pub async fn build(pool: &SqlitePool, config: &Config, comps: &Components) -> To
         m.node(node);
     }
 
-    if !tunnel_on {
+    if !tunnel_on && !m.nodes.iter().any(|x| x.kind == "tunnel") {
         notes.push("Cloudflare Tunnel ist nicht eingerichtet (Einstellungen → Komponenten).".into());
     }
     if reports.is_empty() {
@@ -539,6 +721,140 @@ pub async fn build(pool: &SqlitePool, config: &Config, comps: &Components) -> To
         notes,
         generated_at: now(),
     }
+}
+
+#[derive(Default, Clone)]
+struct CfTunnel {
+    name: String,
+    status: String,
+    connections: usize,
+    origins: Vec<String>,
+    ingress: Vec<(String, String)>,
+    lines: Vec<String>,
+}
+
+struct CfRecord {
+    name: String,
+    kind: String,
+    content: String,
+    proxied: bool,
+}
+
+#[derive(Default)]
+struct CfView {
+    zones: Vec<String>,
+    records: Vec<CfRecord>,
+    tunnels: HashMap<String, CfTunnel>,
+    notes: Vec<String>,
+}
+
+/// Zonen, DNS-Einträge und alle Tunnel, auf die DNS-Einträge zeigen, von Cloudflare lesen.
+async fn cloudflare_view(pool: &SqlitePool, config: &Config) -> CfView {
+    let mut v = CfView::default();
+    if integrations::cloudflare_token(pool).await.map(|t| t.is_empty()).unwrap_or(true) {
+        return v;
+    }
+    let get = |path: String, query: &'static str| async move {
+        integrations::cloudflare_raw(pool, config, Method::GET, &path, Some(query), None).await
+    };
+    let Ok(zones) = get("zones".into(), "per_page=50").await else {
+        v.notes.push("Cloudflare antwortet nicht – Domains und Tunnel von Cloudflare fehlen.".into());
+        return v;
+    };
+    let mut accounts: HashMap<String, String> = HashMap::new();
+    for z in zones.body["result"].as_array().into_iter().flatten() {
+        let (Some(zid), Some(zname)) = (z["id"].as_str(), z["name"].as_str()) else { continue };
+        v.zones.push(zname.to_string());
+        if let Some(acc) = z["account"]["id"].as_str() {
+            accounts.insert(zname.to_string(), acc.to_string());
+        }
+        let Ok(recs) = get(format!("zones/{zid}/dns_records"), "per_page=1000").await else { continue };
+        for r in recs.body["result"].as_array().into_iter().flatten() {
+            let kind = r["type"].as_str().unwrap_or_default().to_string();
+            let name = r["name"].as_str().unwrap_or_default().to_ascii_lowercase();
+            if !matches!(kind.as_str(), "A" | "AAAA" | "CNAME") || name.starts_with('_') {
+                continue;
+            }
+            v.records.push(CfRecord {
+                name,
+                kind,
+                content: r["content"].as_str().unwrap_or_default().to_string(),
+                proxied: r["proxied"].as_bool().unwrap_or(false),
+            });
+        }
+    }
+    let account = accounts.values().next().cloned().unwrap_or_default();
+    let mut ids: Vec<String> = v
+        .records
+        .iter()
+        .filter_map(|r| r.content.strip_suffix(".cfargotunnel.com").map(str::to_ascii_lowercase))
+        .collect();
+    ids.sort();
+    ids.dedup();
+    let mut denied = false;
+    for id in ids {
+        let mut t = CfTunnel::default();
+        if !account.is_empty() {
+            match get(format!("accounts/{account}/cfd_tunnel/{id}"), "").await {
+                Ok(up) if up.status < 300 => {
+                    let r = &up.body["result"];
+                    t.name = r["name"].as_str().unwrap_or_default().to_string();
+                    t.status = r["status"].as_str().unwrap_or_default().to_string();
+                    let conns = r["connections"].as_array().cloned().unwrap_or_default();
+                    t.connections = conns.len();
+                    let mut colos: Vec<String> = Vec::new();
+                    for c in &conns {
+                        if let Some(o) = c["origin_ip"].as_str() {
+                            if !t.origins.contains(&o.to_string()) {
+                                t.origins.push(o.to_string());
+                            }
+                        }
+                        if let Some(colo) = c["colo_name"].as_str() {
+                            if !colos.contains(&colo.to_string()) {
+                                colos.push(colo.to_string());
+                            }
+                        }
+                        if let Some(ver) = c["client_version"].as_str() {
+                            let line = format!("cloudflared {ver}");
+                            if !t.lines.contains(&line) {
+                                t.lines.push(line);
+                            }
+                        }
+                    }
+                    if !colos.is_empty() {
+                        t.lines.push(format!("Cloudflare-Rechenzentren: {}", colos.join(", ")));
+                    }
+                    if !t.origins.is_empty() {
+                        t.lines.push(format!("Connector-IP: {}", t.origins.join(", ")));
+                    }
+                }
+                Ok(up) if up.status == 403 || up.status == 401 => denied = true,
+                _ => {}
+            }
+            if let Ok(up) = get(format!("accounts/{account}/cfd_tunnel/{id}/configurations"), "").await {
+                if up.status < 300 {
+                    for rule in up.body["result"]["config"]["ingress"].as_array().into_iter().flatten() {
+                        let host = rule["hostname"].as_str().unwrap_or_default().to_ascii_lowercase();
+                        let service = rule["service"].as_str().unwrap_or_default().to_string();
+                        if !host.is_empty() && !service.is_empty() {
+                            t.lines.push(format!("{host} → {service}"));
+                            t.ingress.push((host, service));
+                        }
+                    }
+                } else if up.status == 403 || up.status == 401 {
+                    denied = true;
+                }
+            }
+        }
+        if t.ingress.is_empty() {
+            t.lines.push("Ziele unbekannt (Tunnel lokal konfiguriert oder Token ohne Tunnel-Leserecht).".into());
+        }
+        v.tunnels.insert(id, t);
+    }
+    if denied {
+        v.notes.push("Der Cloudflare-Token darf Tunnel nicht lesen – für Status und Ziele der Tunnel das Recht „Konto → Cloudflare Tunnel → Lesen“ ergänzen.".into());
+    }
+    v
 }
 
 fn peer_node(p: &Value, device: &HashSet<IpAddr>) -> TopoNode {

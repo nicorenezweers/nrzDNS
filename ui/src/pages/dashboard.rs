@@ -248,7 +248,7 @@ fn TopList(
                                     move |_| on_pick.call(name.clone())
                                 },
                                 span { class: "flex items-baseline gap-2 text-sm",
-                                    span { class: "min-w-0 flex-1 truncate {font}", "{e.name}" }
+                                    span { class: "sensitive min-w-0 flex-1 truncate {font}", "{e.name}" }
                                     span { class: "shrink-0 tabular-nums text-muted-foreground group-hover:text-foreground", {util::num(e.hits)} }
                                 }
                                 Progress { value: e.hits as f64 / max as f64 * 100.0, class: "h-1 bg-transparent", indicator_class: bar }

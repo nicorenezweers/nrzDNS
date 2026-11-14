@@ -119,6 +119,14 @@ fn Sidebar() -> Element {
                 img { src: asset!("/assets/icon.png"), class: "size-7 rounded-lg", alt: "" }
                 span { class: "text-[15px] font-semibold tracking-tight", "nrzNetwork" }
             }
+            if crate::state::STREAMER() {
+                button { class: "ml-auto flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-400 hover:bg-red-500/20",
+                    title: tr("Streamer-Modus ausschalten"),
+                    onclick: move |_| crate::state::set_streamer(false),
+                    span { class: "size-1.5 animate-pulse rounded-full bg-red-500" }
+                    {tr("Streamer")}
+                }
+            }
         }
 
         nav { class: "flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-3",
@@ -158,9 +166,9 @@ fn ProfileMenu(name: String, admin: bool) -> Element {
         Dropdown { side: Side::Top, class: "w-56",
             trigger_class: "flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-sidenav-accent",
             trigger: rsx! {
-                span { class: "grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold", "{util::initial(&name)}" }
+                span { class: "sensitive grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-sm font-semibold", "{util::initial(&name)}" }
                 span { class: "min-w-0 flex-1",
-                    span { class: "block truncate text-sm font-medium", "{name}" }
+                    span { class: "sensitive block truncate text-sm font-medium", "{name}" }
                     span { class: "block text-xs text-muted-foreground",
                         if admin { {tr("Administrator")} } else { {tr("Mitglied")} }
                     }
@@ -174,6 +182,9 @@ fn ProfileMenu(name: String, admin: bool) -> Element {
             MenuItem { onclick: move |_| { nav.push(Route::Settings { section: "info".into() }); }, icons::Info {} {tr("Info")} }
             MenuSeparator {}
             MenuItem { onclick: move |_| *SHORTCUTS_OPEN.write() = true, icons::Keyboard {} {tr("Tastenkürzel")} }
+            MenuItem { onclick: move |_| crate::state::set_streamer(!crate::state::STREAMER()),
+                if crate::state::STREAMER() { icons::Eye {} {tr("Streamer-Modus aus")} } else { icons::EyeOff {} {tr("Streamer-Modus an")} }
+            }
             MenuItem {
                 onclick: move |_| {
                     spawn(async move {

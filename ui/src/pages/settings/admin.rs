@@ -48,10 +48,10 @@ pub fn Users() -> Element {
                     div { class: "divide-y rounded-lg border",
                         for u in list.iter().cloned() {
                             div { key: "{u.id}", class: "flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-sm",
-                                span { class: "grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-xs font-semibold", "{util::initial(u.name())}" }
+                                span { class: "sensitive grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-xs font-semibold", "{util::initial(u.name())}" }
                                 div { class: "min-w-0 flex-1 basis-48",
                                     p { class: "flex flex-wrap items-center gap-2",
-                                        span { class: if u.disabled { "truncate font-medium text-muted-foreground line-through" } else { "truncate font-medium" }, "{u.name()}" }
+                                        span { class: if u.disabled { "sensitive truncate font-medium text-muted-foreground line-through" } else { "sensitive truncate font-medium" }, "{u.name()}" }
                                         if u.is_admin() {
                                             span { class: "rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground", {tr("Admin")} }
                                         }

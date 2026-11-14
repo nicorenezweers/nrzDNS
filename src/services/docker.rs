@@ -242,8 +242,93 @@ pub async fn inspect(config: &Config, name: &str) -> AppResult<Value> {
     let mut v = get_json(config, &format!("/containers/{name}/json")).await?;
     if let Some(cfg) = v.get_mut("Config").and_then(Value::as_object_mut) {
         cfg.remove("Env");
+        if let Some(cmd) = cfg.get_mut("Cmd") {
+            redact_args(cmd);
+        }
+    }
+    if let Some(args) = v.get_mut("Args") {
+        redact_args(args);
     }
     Ok(v)
+}
+
+/// Geheimnisse in Befehlszeilen ausblenden (`--token xyz`, `--token=xyz`, `--password …`).
+fn redact_args(v: &mut Value) {
+    let Some(list) = v.as_array_mut() else { return };
+    let mut hide_next = false;
+    for a in list.iter_mut() {
+        let Some(s) = a.as_str().map(str::to_string) else { continue };
+        if hide_next {
+            *a = Value::String("***".into());
+            hide_next = false;
+            continue;
+        }
+        let lower = s.to_ascii_lowercase();
+        let secret = ["--token", "--password", "--secret", "--api-key", "--key"];
+        if secret.iter().any(|k| lower == *k) {
+            hide_next = true;
+        } else if let Some(k) = secret.iter().find(|k| lower.starts_with(&format!("{k}="))) {
+            *a = Value::String(format!("{k}=***"));
+        }
+    }
+}
+
+/// Tunnel-IDs, die ein cloudflared-Container benutzt (aus dem Token oder den Argumenten).
+/// Der Token selbst verlässt diese Funktion nie.
+pub async fn tunnel_ids(config: &Config, name: &str) -> Vec<String> {
+    if check_name(name).is_err() {
+        return Vec::new();
+    }
+    let Ok(v) = get_json(config, &format!("/containers/{name}/json")).await else {
+        return Vec::new();
+    };
+    let strs = |x: &Value| -> Vec<String> {
+        x.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s.as_str().map(str::to_string))
+            .collect()
+    };
+    let mut args = strs(&v["Config"]["Entrypoint"]);
+    args.extend(strs(&v["Args"]));
+    args.extend(strs(&v["Config"]["Cmd"]));
+    tunnel_ids_from(&args, &strs(&v["Config"]["Env"]))
+}
+
+fn is_uuid(s: &str) -> bool {
+    s.len() == 36
+        && s.char_indices().all(|(i, c)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                c == '-'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        })
+}
+
+pub fn tunnel_ids_from(args: &[String], env: &[String]) -> Vec<String> {
+    use crate::services::components::decode_tunnel_token;
+    let mut out: Vec<String> = Vec::new();
+    for (i, a) in args.iter().enumerate() {
+        let token = if a == "--token" {
+            args.get(i + 1).cloned()
+        } else {
+            a.strip_prefix("--token=").map(str::to_string)
+        };
+        if let Some((_, id)) = token.as_deref().and_then(decode_tunnel_token) {
+            out.push(id);
+        } else if is_uuid(a) {
+            out.push(a.to_ascii_lowercase());
+        }
+    }
+    for e in env {
+        if let Some((_, id)) = e.strip_prefix("TUNNEL_TOKEN=").and_then(decode_tunnel_token) {
+            out.push(id);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Ausgabe-Rahmen von `docker logs` ohne TTY (8 Byte Kopf je Rahmen) zerlegen.
@@ -367,5 +452,18 @@ mod tests {
         assert_eq!(demux_logs(&raw), "zeile\nfehler\n");
         assert_eq!(demux_logs(b"tty-ausgabe\n"), "tty-ausgabe\n");
         assert!(check_name("../x").is_err());
+    }
+
+    #[test]
+    fn tunnel_ids_and_redaction() {
+        use base64::Engine as _;
+        let tok = base64::engine::general_purpose::STANDARD
+            .encode(r#"{"a":"acc","t":"9ea7bd12-fcaa-4625-bf3f-cc04fa82faeb","s":"geheim"}"#);
+        let args: Vec<String> = ["tunnel", "--no-autoupdate", "run", "--token", &tok].iter().map(|s| s.to_string()).collect();
+        assert_eq!(tunnel_ids_from(&args, &[]), ["9ea7bd12-fcaa-4625-bf3f-cc04fa82faeb"]);
+        assert_eq!(tunnel_ids_from(&[], &[format!("TUNNEL_TOKEN={tok}")]), ["9ea7bd12-fcaa-4625-bf3f-cc04fa82faeb"]);
+        let mut v = serde_json::json!(["run", "--token", tok, "--password=x"]);
+        redact_args(&mut v);
+        assert_eq!(v, serde_json::json!(["run", "--token", "***", "--password=***"]));
     }
 }
