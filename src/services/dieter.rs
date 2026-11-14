@@ -990,7 +990,17 @@ async fn run_claude(ctx: &Ctx, s: &Stored, conv: i64, text: &str) -> AppResult<(
                             .as_str()
                             .unwrap_or("Fehler der Claude CLI")
                             .to_string();
-                        let _ = add_message(&ctx.pool, conv, "error", &r, "", "", "").await;
+                        if r.trim() == final_text {
+                            // Schon als Antwort gezeigt – als Fehler kennzeichnen statt doppelt
+                            let _ = sqlx::query(
+                                "UPDATE dieter_messages SET role = 'error' WHERE id = (SELECT max(id) FROM dieter_messages WHERE conversation_id = ? AND role = 'assistant')",
+                            )
+                            .bind(conv)
+                            .execute(&ctx.pool)
+                            .await;
+                        } else {
+                            let _ = add_message(&ctx.pool, conv, "error", &r, "", "", "").await;
+                        }
                     } else if let Some(r) = v["result"].as_str() {
                         if r.trim() != final_text && !r.trim().is_empty() {
                             let _ = add_message(&ctx.pool, conv, "assistant", r.trim(), "", "", "")
