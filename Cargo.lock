@@ -1588,7 +1588,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1624,13 +1624,14 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "tracing-subscriber",
+ "urlencoding",
  "webpki-roots",
  "x509-parser",
 ]
 
 [[package]]
 name = "nrzdns-engine"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "flate2",
  "hickory-proto",
@@ -1647,7 +1648,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns-types"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3265,6 +3266,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "utf8_iter"

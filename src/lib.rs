@@ -92,6 +92,7 @@ pub async fn build_with(figment: Figment) -> Result<Rocket<Build>, error::AppErr
         .manage(services::blocking::Updater::default())
         .manage(fairings::LogWriter::default())
         .manage(services::mcp::McpState::default())
+        .manage(services::spy::SpyState::default())
         .attach(fairings::RequestLog)
         // Rockets Shield ohne eigene Header: die setzt alle SecurityHeaders (sonst gewönne
         // Shields X-Frame-Options: SAMEORIGIN über unser DENY)

@@ -12,6 +12,7 @@ pub mod not_found;
 pub mod proxy;
 pub mod resolve;
 pub mod settings;
+pub mod spy;
 pub mod tools;
 pub mod zone;
 pub mod zones;

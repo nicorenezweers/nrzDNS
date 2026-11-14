@@ -28,6 +28,7 @@ use pages::not_found::NotFound;
 use pages::proxy::Proxy;
 use pages::resolve::Resolve;
 use pages::settings::Settings;
+use pages::spy::Spy;
 use pages::tools::Tools;
 use pages::zone::ZoneView;
 use pages::zones::Zones;
@@ -78,6 +79,8 @@ pub enum Route {
         Domains {},
         #[route("/netbird")]
         Netbird {},
+        #[route("/spy")]
+        Spy {},
         #[route("/tools")]
         Tools {},
         #[route("/resolve?:name&:qtype")]

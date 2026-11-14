@@ -85,6 +85,9 @@
 //! | `PUT /integrations` | [`IntegrationsInput`] → [`IntegrationsStatus`] | Admin |
 //! | `GET\|POST\|PUT\|PATCH\|DELETE /cloudflare/<pfad>` | Cloudflare-API (`/client/v4/<pfad>`): Zonen lesen, DNS-Einträge verwalten; Antwort unverändert | lesen: angemeldet, ändern: Admin |
 //! | `GET\|POST\|PUT\|DELETE /netbird/<pfad>` | NetBird-API (`/api/<pfad>`): Geräte, Gruppen, Policies, Netzwerke, DNS, Setup-Keys, Benutzer; Antwort unverändert | lesen: angemeldet, ändern: Admin |
+//! | `GET /spy` | → [`SpyStatus`] (laufender Scan, eigene Domains, letzte Berichte) | angemeldet |
+//! | `POST /spy/scan` | [`SpyScanInput`] → [`SpyStatus`] (Scan im Hintergrund; aktiv nur für eigene Domains) | Admin |
+//! | `DELETE /spy/reports/<domain>` | → `204` | Admin |
 //! | `POST /tools/ping` | [`PingInput`] → [`PingResult`] (ICMP, sonst TCP) | angemeldet |
 //! | `POST /tools/ports` | [`PortsInput`] → [`PortsResult`] | angemeldet |
 //! | `POST /tools/http` | [`HttpCheckInput`] → [`HttpCheckResult`] | angemeldet |
@@ -101,8 +104,10 @@
 
 use serde::{Deserialize, Serialize};
 
+mod spy;
 mod tls;
 mod tools;
+pub use spy::*;
 pub use tls::*;
 pub use tools::*;
 

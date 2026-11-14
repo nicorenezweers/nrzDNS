@@ -8,6 +8,7 @@ pub mod mcp;
 pub mod proxy;
 pub mod querylog;
 pub mod settings;
+pub mod spy;
 pub mod sync;
 pub mod tls;
 pub mod tools;
