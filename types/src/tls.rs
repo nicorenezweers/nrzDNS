@@ -75,3 +75,40 @@ pub struct TlsStatus {
     pub listen: Vec<String>,
     pub listen_errors: Vec<String>,
 }
+
+// ------------------------------------------------------------------ Verbindungen
+
+/// `PUT /integrations` – leere Tokens = bisherige behalten.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct IntegrationsInput {
+    /// Cloudflare-API-Token (Rechte: Zone → Zone → Lesen und Zone → DNS → Bearbeiten).
+    pub cloudflare_token: String,
+    pub clear_cloudflare: bool,
+    /// Adresse der NetBird-Verwaltung, leer = NetBird Cloud (`https://api.netbird.io`).
+    pub netbird_url: String,
+    /// Persönliches Zugangstoken (NetBird → Einstellungen → Persönliche Zugangstoken).
+    pub netbird_token: String,
+    pub clear_netbird: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct IntegrationStatus {
+    /// Token gespeichert.
+    pub configured: bool,
+    /// Letzte Prüfung erfolgreich (nur bei `GET /integrations?test=true`).
+    pub ok: bool,
+    /// „Verbunden als …“ oder die Fehlermeldung.
+    pub detail: String,
+}
+
+/// `GET /integrations[?test=true]`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct IntegrationsStatus {
+    pub cloudflare: IntegrationStatus,
+    pub netbird: IntegrationStatus,
+    /// Eingetragene NetBird-Adresse (leer = NetBird Cloud).
+    pub netbird_url: String,
+}

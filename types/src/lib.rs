@@ -81,6 +81,10 @@
 //! | `PUT /tls` | [`TlsSettingsInput`] → [`TlsStatus`] | Admin |
 //! | `POST /tls/issue` | → [`TlsStatus`] (Zertifikat jetzt holen, läuft im Hintergrund) | Admin |
 //! | `DELETE /tls/certificate` | → `204` (Zertifikat entfernen) | Admin |
+//! | `GET /integrations[?test=true]` | → [`IntegrationsStatus`] (Cloudflare, NetBird; mit `test` werden beide APIs gefragt) | angemeldet |
+//! | `PUT /integrations` | [`IntegrationsInput`] → [`IntegrationsStatus`] | Admin |
+//! | `GET\|POST\|PUT\|PATCH\|DELETE /cloudflare/<pfad>` | Cloudflare-API (`/client/v4/<pfad>`): Zonen lesen, DNS-Einträge verwalten; Antwort unverändert | lesen: angemeldet, ändern: Admin |
+//! | `GET\|POST\|PUT\|DELETE /netbird/<pfad>` | NetBird-API (`/api/<pfad>`): Geräte, Gruppen, Policies, Netzwerke, DNS, Setup-Keys, Benutzer; Antwort unverändert | lesen: angemeldet, ändern: Admin |
 //! | `POST /tools/ping` | [`PingInput`] → [`PingResult`] (ICMP, sonst TCP) | angemeldet |
 //! | `POST /tools/ports` | [`PortsInput`] → [`PortsResult`] | angemeldet |
 //! | `POST /tools/http` | [`HttpCheckInput`] → [`HttpCheckResult`] | angemeldet |

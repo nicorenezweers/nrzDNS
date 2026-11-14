@@ -87,6 +87,8 @@ pub struct Device {
     pub ip: String,
     /// Selbst vergebener Name (leer = keiner).
     pub name: String,
+    /// Name des Geräts in NetBird (leer = kein NetBird-Gerät oder nicht verbunden).
+    pub netbird_name: String,
     pub queries: u64,
     pub blocked: u64,
     /// Zuletzt gesehen (Unix-Sekunden).

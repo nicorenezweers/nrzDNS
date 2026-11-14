@@ -5,6 +5,7 @@ mod admin;
 mod auth;
 mod blocking;
 mod cache;
+mod integrations;
 mod logs;
 mod mcp;
 mod me;
@@ -33,6 +34,7 @@ pub fn routes() -> Vec<Route> {
     r.extend(proxy::routes());
     r.extend(requests::routes());
     r.extend(settings::routes());
+    r.extend(integrations::routes());
     r.extend(tls::routes());
     r.extend(tools::routes());
     r.extend(zones::routes());

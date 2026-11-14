@@ -1588,14 +1588,18 @@ dependencies = [
 
 [[package]]
 name = "nrzdns"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
+ "bytes",
  "flate2",
  "futures",
  "hex",
+ "http 1.5.0",
  "hyper 0.14.32",
+ "hyper-rustls",
+ "hyper-util",
  "instant-acme",
  "nrzdns-engine",
  "nrzdns-types",
@@ -1620,12 +1624,13 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "tracing-subscriber",
+ "webpki-roots",
  "x509-parser",
 ]
 
 [[package]]
 name = "nrzdns-engine"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "flate2",
  "hickory-proto",
@@ -1642,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns-types"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "serde",
  "serde_json",

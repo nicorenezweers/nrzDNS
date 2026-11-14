@@ -27,6 +27,8 @@ nrzNetwork answers the DNS queries of your whole network from one small program.
 | **DNS client** | Ask this server (with zones, blocking and cache) or any other server over UDP, TCP, DoT or DoH, for any record type — with flags, answer, authority and additional sections. |
 | **MCP server** | **Model Context Protocol** at `/mcp` for [nrzDashboard](#mcp-server-nrzdashboard) and other MCP clients: all figures for an overview in one call, statistics, query log, server and blocking state — and, if the admin allows it, turn filters on/off, pause them, switch blocklists, add rules, flush the cache. |
 | **Reverse proxy** | Names instead of IP and port: `music.nrz.ch` → `http://100.78.107.162:8350`, `bench.nrz.ch` → `http://100.78.107.162:8550`. nrzNetwork answers the name itself with the address of the proxy, and the built-in HTTP proxy forwards by `Host` header — streaming, WebSockets, redirects rewritten. You don't need to own the domain; it works on every device that uses nrzNetwork. HTTP only. |
+| **Domains (Cloudflare)** | All zones of your Cloudflare account and **all DNS records** in one place: A, AAAA, CNAME, TXT, MX, NS, SRV, CAA — create, edit, delete, search, toggle the Cloudflare proxy (orange cloud), TTL and comments. |
+| **NetBird** | Your whole NetBird network through the NetBird API (cloud or self-hosted): **devices** (rename, groups, SSH, login expiry, remove), **groups**, **access rules** (who may reach whom, protocols, ports), **networks** (resources and routing peers), **DNS** (nameserver groups, plus one click: *nrzNetwork as DNS for all NetBird devices*), **setup keys** (with ready-to-copy `netbird up` command) and **users** (invite, role, block). The Devices page shows NetBird names automatically. |
 | **HTTPS for your own domains** | A real Let's Encrypt certificate (e.g. `zweers.ch` + `*.zweers.ch`) obtained through the DNS-01 challenge with a **Cloudflare API token** — nothing has to be reachable from outside, it works purely in the local network. Entries then open as `https://music.zweers.ch` without a warning; `http://` can redirect to `https://`. Renews automatically when a third of the lifetime is left. HTTPS for names without an own certificate (e.g. umbrelOS's own HTTPS) is passed through untouched by SNI. |
 | **Block page** | Blocked domains can point at nrzNetwork itself (block mode *block page*, the default): `http://` sites show "This site was blocked by nrzNetwork" with buttons to **unlock it for a while** (15 min, 1 h, 4 h – configurable) and a form to **ask for permanent access**; the admin approves or rejects requests under *Allowed*. Unlocks end by themselves. |
 | **Devices & network tools** | Every device that asks nrzNetwork, with queries, blocked share and last seen — give devices names. **Ping** (ICMP, TCP fallback), **port check**, **HTTP check** (status, time, redirects, headers) and a **subnet calculator**. |
@@ -44,7 +46,7 @@ You need Docker. The image contains the program and the web interface.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.4.0
+  ghcr.io/nicorenezweers/nrz-dns:1.5.0
 ```
 
 The image is multi-arch (`linux/amd64`, `linux/arm64`) and is published for every [release](https://github.com/nicorenezweers/nrzDNS/releases). To build it yourself instead:
@@ -64,7 +66,7 @@ Open <http://localhost:8380>. The first account you create becomes the administr
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.4.0   # or: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.5.0   # or: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -98,10 +100,10 @@ The container runs as user `1000` without any capabilities. Docker (20.10 and la
 Every [release](https://github.com/nicorenezweers/nrzDNS/releases) has the program for Linux (`amd64`, `arm64`) as a single file, with `SHA256SUMS`. It brings its own root certificates for DoT, DoH and blocklist downloads.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.4.0/nrzdns-1.4.0-linux-amd64
-chmod +x nrzdns-1.4.0-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.4.0-linux-amd64   # allow port 53 without root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.4.0-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.5.0/nrzdns-1.5.0-linux-amd64
+chmod +x nrzdns-1.5.0-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.5.0-linux-amd64   # allow port 53 without root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.5.0-linux-amd64
 ```
 
 To try it without touching port 53, let it listen elsewhere, e.g. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, and ask it with `dig @127.0.0.1 -p 5353 example.com`.
@@ -109,7 +111,7 @@ To try it without touching port 53, let it listen elsewhere, e.g. `NRZDNS_DNS_LI
 ### Both architectures
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.4.0 --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.5.0 --push .
 ```
 
 Rust is cross-compiled, not emulated, so the arm64 build is fast on an x86 machine and vice versa. Only the program, gzipped per architecture (for the Umbrel app): `scripts/store-binaries.sh <folder>`.

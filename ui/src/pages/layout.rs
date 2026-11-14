@@ -130,6 +130,8 @@ fn Sidebar() -> Element {
             NavItem { to: Route::Cache {}, label: tr("Cache"), active: matches!(route, Route::Cache {}), icon: rsx! { icons::Database {} } }
             NavItem { to: Route::Resolve { name: None, qtype: None }, label: tr("DNS-Client"), active: matches!(route, Route::Resolve { .. }), icon: rsx! { icons::Terminal {} } }
             NavItem { to: Route::Devices {}, label: tr("Geräte"), active: matches!(route, Route::Devices {}), icon: rsx! { icons::MonitorSmartphone {} } }
+            NavItem { to: Route::Netbird {}, label: tr("NetBird"), active: matches!(route, Route::Netbird {}), icon: rsx! { icons::Waypoints {} } }
+            NavItem { to: Route::Domains {}, label: tr("Domains"), active: matches!(route, Route::Domains {}), icon: rsx! { icons::Globe {} } }
             NavItem { to: Route::Tools {}, label: tr("Netzwerk-Tools"), active: matches!(route, Route::Tools {}), icon: rsx! { icons::Wrench {} } }
             div { class: "my-2 h-px bg-sidenav-border" }
             NavItem { to: Route::Settings { section: "general".into() }, label: tr("Einstellungen"), active: matches!(route, Route::Settings { .. }), icon: rsx! { icons::Settings {} } }

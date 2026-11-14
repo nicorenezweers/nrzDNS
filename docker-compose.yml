@@ -4,7 +4,7 @@
 # systemd-resolved mit DNSStubListener auf 0.0.0.0:53).
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.4.0
+    image: ghcr.io/nicorenezweers/nrz-dns:1.5.0
     # Selbst bauen statt das fertige Image zu holen:
     # build: .
     container_name: nrzdns

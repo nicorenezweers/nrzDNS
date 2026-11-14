@@ -44,6 +44,8 @@ const RETRY_AFTER: i64 = 6 * 3600;
 struct Stored {
     #[serde(flatten)]
     settings: TlsSettings,
+    /// Früher hier, jetzt bei den Verbindungen (wird dorthin übernommen).
+    #[serde(skip_serializing_if = "String::is_empty")]
     cloudflare_token: String,
 }
 
@@ -105,20 +107,12 @@ pub async fn save(
     {
         return Err(AppError::bad("E-Mail: bitte eine gültige Adresse angeben."));
     }
+    // Altes Token zu den Verbindungen übernehmen und hier nicht mehr speichern
+    crate::services::integrations::cloudflare_token(pool).await?;
+    s.cloudflare_token.clear();
     let token = input.cloudflare_token.trim();
-    if input.clear_token {
-        s.cloudflare_token.clear();
-    } else if !token.is_empty() {
-        if token.len() > 200
-            || !token
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
-            return Err(AppError::bad(
-                "Cloudflare-Token: bitte das API-Token kopieren (Buchstaben, Ziffern, - und _).",
-            ));
-        }
-        s.cloudflare_token = token.to_string();
+    if !token.is_empty() && !input.clear_token {
+        crate::services::integrations::set_cloudflare_token(pool, token).await?;
     }
     if input.settings.enabled && domains.is_empty() {
         return Err(AppError::bad(
@@ -190,7 +184,9 @@ pub async fn status(
     let tls = state.tls();
     Ok(TlsStatus {
         settings: s.settings,
-        token_set: !s.cloudflare_token.is_empty(),
+        token_set: !crate::services::integrations::cloudflare_token(pool)
+            .await?
+            .is_empty(),
         certificate: tls.cert().map(|c| CertificateInfo {
             names: c.names,
             issuer: c.issuer,
@@ -245,7 +241,10 @@ fn needs_renewal(cert: Option<&LoadedCert>, wanted: &[String], now: i64) -> bool
 /// Zertifikat holen, falls nötig (Hintergrund, stündlich).
 pub async fn maybe_renew(pool: &SqlitePool, engine: &Engine, state: &ProxyState, config: &Config) {
     let Ok(s) = stored(pool).await else { return };
-    if !s.settings.enabled || s.cloudflare_token.is_empty() || s.settings.domains.is_empty() {
+    let token = crate::services::integrations::cloudflare_token(pool)
+        .await
+        .unwrap_or_default();
+    if !s.settings.enabled || token.is_empty() || s.settings.domains.is_empty() {
         return;
     }
     let tls = state.tls();
@@ -310,10 +309,7 @@ async fn account(config: &Config, s: &TlsSettings) -> AppResult<Account> {
             LetsEncrypt::Production.url().to_string()
         }
     });
-    let builder = || match &config.acme_root {
-        Some(root) => Account::builder_with_root(root),
-        None => Account::builder(),
-    };
+    let builder = || acme_http(config.acme_root.as_deref()).map(Account::builder_with_http);
     // Je Server ein eigenes Konto (Staging und Produktion sind getrennt)
     let file = d.join(format!("account-{:016x}.json", fnv(&directory)));
     if let Ok(raw) = std::fs::read_to_string(&file) {
@@ -343,6 +339,39 @@ async fn account(config: &Config, s: &TlsSettings) -> AppResult<Account> {
     let raw = serde_json::to_string(&creds).map_err(|e| AppError::Config(e.to_string()))?;
     write_private(&file, &raw)?;
     Ok(account)
+}
+
+/// HTTP-Client für ACME: eingebaute Stammzertifikate (Mozilla, `webpki-roots`) – der
+/// Container hat keinen Zertifikatsspeicher –, dazu optional eine eigene Stelle (Tests).
+fn acme_http(
+    extra_root: Option<&Path>,
+) -> Result<Box<dyn instant_acme::HttpClient>, instant_acme::Error> {
+    let other = |e: String| instant_acme::Error::Other(e.into());
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Some(path) = extra_root {
+        let pem = std::fs::read(path).map_err(|e| other(format!("{}: {e}", path.display())))?;
+        for cert in rustls_pemfile::certs(&mut pem.as_slice()) {
+            let cert = cert.map_err(|e| other(e.to_string()))?;
+            roots.add(cert).map_err(|e| other(e.to_string()))?;
+        }
+    }
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    let tls = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| other(e.to_string()))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let connector = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_tls_config(tls)
+        .https_only()
+        .enable_http1()
+        .enable_http2()
+        .build();
+    let client: hyper_util::client::legacy::Client<_, instant_acme::BodyWrapper<bytes::Bytes>> =
+        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+            .build(connector);
+    Ok(Box::new(client))
 }
 
 fn fnv(s: &str) -> u64 {
@@ -381,12 +410,13 @@ async fn run(
             "Bitte zuerst die Namen eintragen, z. B. *.zweers.ch.",
         ));
     }
-    if s.cloudflare_token.is_empty() {
+    let token = crate::services::integrations::cloudflare_token(pool).await?;
+    if token.is_empty() {
         return Err(AppError::bad(
             "Bitte zuerst ein Cloudflare-API-Token eintragen.",
         ));
     }
-    let cf = Cloudflare::new(&config.cloudflare_api, &s.cloudflare_token)?;
+    let cf = Cloudflare::new(&config.cloudflare_api, &token)?;
 
     tls.set_progress("Cloudflare: Zone suchen");
     let zone = cf.zone_for(&s.settings.domains[0]).await?;
@@ -737,6 +767,19 @@ mod tests {
         assert!(normalize_names(&["*.*.zweers.ch".into()]).is_err());
         assert!(normalize_names(&["ch".into()]).is_err());
         assert!(normalize_names(&["a b.ch".into()]).is_err());
+    }
+
+    /// Let's Encrypt (Staging) mit den eingebauten Stammzertifikaten erreichen – auch ohne
+    /// Zertifikatsspeicher im System (`cargo test -- --ignored`, braucht Internet).
+    #[tokio::test]
+    #[ignore]
+    async fn reaches_lets_encrypt_without_system_roots() {
+        let http = acme_http(None).unwrap();
+        let request = http::Request::get(LetsEncrypt::Staging.url())
+            .body(instant_acme::BodyWrapper::default())
+            .unwrap();
+        let resp = http.request(request).await.unwrap();
+        assert_eq!(resp.parts.status, 200);
     }
 
     #[test]

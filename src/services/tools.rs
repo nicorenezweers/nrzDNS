@@ -312,9 +312,15 @@ pub async fn devices(pool: &SqlitePool, days: u32) -> AppResult<Vec<Device>> {
     .bind(since_ms)
     .fetch_all(pool)
     .await?;
+    let nb = crate::services::integrations::netbird_peer_names(pool).await;
     Ok(rows
         .into_iter()
         .map(|(ip, queries, blocked, last_ms, name)| Device {
+            netbird_name: ip
+                .parse::<IpAddr>()
+                .ok()
+                .and_then(|a| nb.get(&a).cloned())
+                .unwrap_or_default(),
             ip,
             name: name.unwrap_or_default(),
             queries: queries.max(0) as u64,

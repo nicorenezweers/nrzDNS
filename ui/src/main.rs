@@ -5,6 +5,7 @@
 mod api;
 mod components;
 mod i18n;
+mod json;
 mod labels;
 mod pages;
 mod state;
@@ -19,8 +20,10 @@ use pages::blocking::Blocking;
 use pages::cache::Cache;
 use pages::dashboard::Dashboard;
 use pages::devices::Devices;
+use pages::domains::Domains;
 use pages::layout::AppLayout;
 use pages::logs::Logs;
+use pages::netbird::Netbird;
 use pages::not_found::NotFound;
 use pages::proxy::Proxy;
 use pages::resolve::Resolve;
@@ -71,6 +74,10 @@ pub enum Route {
         Proxy {},
         #[route("/devices")]
         Devices {},
+        #[route("/domains")]
+        Domains {},
+        #[route("/netbird")]
+        Netbird {},
         #[route("/tools")]
         Tools {},
         #[route("/resolve?:name&:qtype")]

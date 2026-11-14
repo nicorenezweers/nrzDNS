@@ -67,7 +67,7 @@ pub fn Devices() -> Element {
                 Some(Ok(items)) => {
                     let shown: Vec<Device> = items
                         .iter()
-                        .filter(|d| filter.is_empty() || d.ip.contains(&filter) || d.name.to_lowercase().contains(&filter))
+                        .filter(|d| filter.is_empty() || d.ip.contains(&filter) || d.name.to_lowercase().contains(&filter) || d.netbird_name.to_lowercase().contains(&filter))
                         .cloned()
                         .collect();
                     rsx! {
@@ -90,10 +90,18 @@ pub fn Devices() -> Element {
                                     for d in shown {
                                         TableRow { key: "{d.ip}",
                                             TableCell {
-                                                if d.name.is_empty() {
+                                                if d.name.is_empty() && d.netbird_name.is_empty() {
                                                     span { class: "font-mono text-[13px]", "{d.ip}" }
                                                 } else {
-                                                    p { class: "font-medium", "{d.name}" }
+                                                    p { class: "font-medium",
+                                                        if d.name.is_empty() { "{d.netbird_name}" } else { "{d.name}" }
+                                                        if !d.netbird_name.is_empty() {
+                                                            span { class: "ml-1.5 inline-flex items-center gap-1 rounded-full border px-1.5 text-[11px] font-normal text-muted-foreground", title: tr("Name in NetBird"),
+                                                                icons::Waypoints { class: "size-3" }
+                                                                if d.name.is_empty() { "NetBird" } else { "{d.netbird_name}" }
+                                                            }
+                                                        }
+                                                    }
                                                     p { class: "font-mono text-xs text-muted-foreground", "{d.ip}" }
                                                 }
                                             }

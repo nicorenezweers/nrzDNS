@@ -6,6 +6,7 @@ mod account;
 mod admin;
 mod dns;
 mod info;
+mod integrations;
 mod mcp;
 
 use crate::Route;
@@ -65,6 +66,12 @@ const ITEMS: &[Item] = &[
         admin_only: true,
     },
     Item {
+        key: "integrations",
+        label: "Verbindungen",
+        group: "Instanz",
+        admin_only: false,
+    },
+    Item {
         key: "mcp",
         label: "MCP",
         group: "Instanz",
@@ -106,6 +113,7 @@ fn icon(key: &str) -> Element {
         "account" => rsx! { icons::User {} },
         "users" => rsx! { icons::Users {} },
         "mcp" => rsx! { icons::Plug {} },
+        "integrations" => rsx! { icons::Cable {} },
         _ => rsx! { icons::Info {} },
     }
 }
@@ -149,6 +157,7 @@ pub fn Settings(section: String) -> Element {
                     "users" if admin => rsx! { admin::Users {} },
                     "mcp" if admin => rsx! { mcp::Mcp {} },
                     "info" => rsx! { info::Info {} },
+                    "integrations" => rsx! { integrations::Integrations {} },
                     _ => rsx! { Callout { text: tr("Diesen Bereich gibt es nicht oder er ist nur für Administratoren.") } },
                 }
             }

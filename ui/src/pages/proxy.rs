@@ -1,6 +1,7 @@
 //! Reverse Proxy: Namen wie `music.nrz.ch` an ein HTTP-Ziel wie `http://100.78.107.162:8350`
 //! weiterreichen. nrzNetwork beantwortet den Namen selbst mit der Adresse des Proxys.
 
+use crate::Route;
 use crate::api;
 use crate::components::common::*;
 use crate::components::overlay::*;
@@ -495,7 +496,6 @@ fn HttpsForm(
         }
     });
     let mut email = use_signal(|| s.email.clone());
-    let mut token = use_signal(String::new);
     let mut staging = use_signal(|| s.staging);
     let mut redirect = use_signal(|| s.redirect_http);
     let mut busy = use_signal(|| false);
@@ -513,7 +513,7 @@ fn HttpsForm(
             staging: staging(),
             redirect_http: redirect(),
         },
-        cloudflare_token: token().trim().to_string(),
+        cloudflare_token: String::new(),
         clear_token: false,
     };
     let save = move |e: FormEvent| {
@@ -524,7 +524,6 @@ fn HttpsForm(
             busy.set(false);
             match res {
                 Ok(_) => {
-                    token.set(String::new());
                     toast(tr("Gespeichert."));
                     tick += 1;
                 }
@@ -544,7 +543,6 @@ fn HttpsForm(
             busy.set(false);
             match res {
                 Ok(_) => {
-                    token.set(String::new());
                     was_issuing.set(true);
                     tick += 1;
                 }
@@ -625,19 +623,13 @@ fn HttpsForm(
                         input { class: INPUT, disabled: !admin, r#type: "email", autocomplete: "email", placeholder: "admin@zweers.ch", value: "{email}", oninput: move |e| email.set(e.value()) }
                     }
                 }
-                Field {
-                    label: tr("Cloudflare-API-Token"),
-                    hint: tr("In Cloudflare: Profil → API-Tokens → Token erstellen → Vorlage „Zone-DNS bearbeiten“ → Zone zweers.ch. Wird nur auf diesem Gerät gespeichert und nie wieder angezeigt."),
-                    input {
-                        class: "{INPUT} font-mono text-[13px]",
-                        disabled: !admin,
-                        r#type: "password",
-                        autocomplete: "off",
-                        spellcheck: false,
-                        placeholder: if status.token_set { tr("gespeichert – leer lassen, um es zu behalten") } else { tr("Token einfügen") },
-                        value: "{token}",
-                        oninput: move |e| token.set(e.value()),
+                div { class: "flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm",
+                    if status.token_set {
+                        span { class: "flex items-center gap-2", crate::json::Dot { on: true } {tr("Cloudflare ist verbunden.")} }
+                    } else {
+                        span { class: "flex items-center gap-2 text-amber-500", crate::json::Dot { on: false } {tr("Cloudflare ist noch nicht verbunden – das Token kommt unter Einstellungen → Verbindungen.")} }
                     }
+                    Link { class: btn_sm(BTN_OUTLINE), to: Route::Settings { section: "integrations".into() }, icons::Plug {} {tr("Verbindungen")} }
                 }
                 Toggle { checked: redirect(), disabled: !admin, onchange: move |v| redirect.set(v),
                     label: tr("http:// auf https:// umleiten"),
