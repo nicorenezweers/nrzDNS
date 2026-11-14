@@ -117,6 +117,9 @@ impl<'r> FromRequest<'r> for CurrentUser {
         if is_cross_origin(req) {
             return reject(req, cross_origin_error());
         }
+        if let Some(user) = dieter_user(req) {
+            return Outcome::Success(CurrentUser(user));
+        }
         match session_user(req).await {
             Some(user) => Outcome::Success(CurrentUser(user)),
             None => reject(req, AppError::Unauthorized),
@@ -207,4 +210,28 @@ impl<'r> FromRequest<'r> for ClientIp {
                 .unwrap_or_else(|| "unbekannt".into()),
         ))
     }
+}
+
+/// Dieter (KI-Assistent) meldet sich intern an: geheimer Schlüssel, nur von 127.0.0.1.
+fn dieter_user(req: &Request<'_>) -> Option<User> {
+    let key = req
+        .headers()
+        .get_one(crate::services::dieter::INTERNAL_HEADER)?;
+    let state = req
+        .rocket()
+        .state::<crate::services::dieter::DieterState>()?;
+    let local = req.remote().is_some_and(|a| a.ip().is_loopback());
+    if !local || key.len() != state.key().len() || key != state.key() {
+        return None;
+    }
+    Some(User {
+        id: 0,
+        username: "dieter".into(),
+        display_name: "Dieter (KI)".into(),
+        role: nrzdns_types::Role::Admin,
+        disabled: false,
+        created_at: 0,
+        last_login_at: None,
+        preferences: Default::default(),
+    })
 }

@@ -49,6 +49,9 @@ pub struct Config {
     pub cloudflare_api: String,
     /// Vor der Prüfung warten, bis Cloudflares Nameserver den TXT-Eintrag ausliefern.
     pub acme_dns_check: bool,
+    /// Dieter: Chat-API von OpenRouter bzw. xAI (`NRZDNS_DIETER_OPENROUTER_URL`, …).
+    pub dieter_openrouter_url: String,
+    pub dieter_xai_url: String,
     /// GitHub-API für Updates der Komponenten (`NRZDNS_GITHUB_API`).
     pub github_api: String,
     /// Spy: DNS über HTTPS (JSON) für den Blick von aussen.
@@ -87,6 +90,8 @@ impl Default for Config {
             cloudflare_api: "https://api.cloudflare.com/client/v4".into(),
             acme_dns_check: true,
             github_api: "https://api.github.com".into(),
+            dieter_openrouter_url: "https://openrouter.ai/api/v1/chat/completions".into(),
+            dieter_xai_url: "https://api.x.ai/v1/chat/completions".into(),
             spy_doh: "https://cloudflare-dns.com/dns-query".into(),
             spy_crtsh: "https://crt.sh".into(),
             spy_rdap: "https://rdap.org".into(),

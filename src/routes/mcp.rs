@@ -20,7 +20,7 @@ use sqlx::SqlitePool;
 use std::io::Cursor;
 
 pub fn routes() -> Vec<Route> {
-    routes![post_mcp, get_mcp, delete_mcp]
+    routes![post_mcp, get_mcp, delete_mcp, post_dieter]
 }
 
 /// Protokollversionen, die dieser Server spricht (neueste zuerst).
@@ -287,4 +287,70 @@ fn get_mcp() -> Reply {
 #[delete("/mcp")]
 fn delete_mcp() -> Reply {
     Reply::error(Status::MethodNotAllowed, "Nur POST.")
+}
+
+/// Interner MCP-Zugang für Dieter (Claude CLI): nur von 127.0.0.1 mit dem internen Schlüssel.
+#[allow(clippy::too_many_arguments)]
+#[post("/mcp/dieter", data = "<data>")]
+async fn post_dieter(
+    headers: McpHeaders,
+    remote: Option<std::net::SocketAddr>,
+    data: Data<'_>,
+    pool: &State<SqlitePool>,
+    config: &State<Config>,
+    engine: &State<Engine>,
+    dieter: &State<crate::services::dieter::DieterState>,
+    comps: &State<crate::services::components::Components>,
+    proxy: &State<crate::proxy::ProxyState>,
+) -> Reply {
+    let local = remote.is_some_and(|a| a.ip().is_loopback());
+    if !local || headers.token.as_deref() != Some(dieter.key()) {
+        return Reply::error(Status::Unauthorized, "Nur für Dieter.");
+    }
+    let text = match data.open(MAX_BODY_KIB.kibibytes()).into_string().await {
+        Ok(t) if t.is_complete() => t.into_inner(),
+        _ => return Reply::error(Status::BadRequest, "Anfrage nicht lesbar."),
+    };
+    let Ok(m) = serde_json::from_str::<Value>(&text) else {
+        return Reply::json(rpc_error(Value::Null, -32700, "Parse error"));
+    };
+    let ctx = crate::services::dieter::Ctx {
+        pool: pool.inner().clone(),
+        config: config.inner().clone(),
+        engine: engine.inner().clone(),
+        state: dieter.inner().clone(),
+        components: comps.inner().clone(),
+        proxy: proxy.inner().clone(),
+    };
+    let allow = crate::services::dieter::allow_changes(pool).await;
+    let method = m.get("method").and_then(Value::as_str).unwrap_or_default();
+    let Some(id) = m.get("id").cloned() else {
+        return accepted();
+    };
+    let params = m.get("params").cloned().unwrap_or(Value::Null);
+    Reply::json(match method {
+        "initialize" => rpc_result(
+            id,
+            json!({
+                "protocolVersion": params.get("protocolVersion").and_then(Value::as_str).unwrap_or(VERSIONS[0]),
+                "capabilities": { "tools": { "listChanged": false } },
+                "serverInfo": { "name": "nrznetwork", "title": "nrzNetwork (Dieter)", "version": crate::VERSION }
+            }),
+        ),
+        "ping" => rpc_result(id, json!({})),
+        "tools/list" => rpc_result(id, json!({ "tools": crate::services::dieter::mcp_tools() })),
+        "tools/call" => {
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+            let (result, _) = crate::services::dieter::call_tool(&ctx, allow, name, &args).await;
+            rpc_result(
+                id,
+                json!({ "content": [{ "type": "text", "text": result }], "isError": false }),
+            )
+        }
+        _ => rpc_error(id, -32601, "Method not found"),
+    })
 }

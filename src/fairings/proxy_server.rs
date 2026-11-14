@@ -26,6 +26,9 @@ impl Fairing for ProxyServer {
         else {
             return;
         };
+        if let Some(d) = rocket.state::<crate::services::dieter::DieterState>() {
+            d.set_port(rocket.config().port);
+        }
         if !config.background {
             return;
         }
@@ -54,6 +57,23 @@ impl Fairing for ProxyServer {
                     pool.clone(),
                     config.clone(),
                     comps.clone(),
+                    rocket.shutdown(),
+                ));
+            }
+            if let (Some(d), Some(comps)) = (
+                rocket.state::<crate::services::dieter::DieterState>(),
+                rocket.state::<crate::services::components::Components>(),
+            ) {
+                d.set_port(rocket.config().port);
+                tokio::spawn(crate::services::dieter::watcher(
+                    crate::services::dieter::Ctx {
+                        pool: pool.clone(),
+                        config: config.clone(),
+                        engine: engine.clone(),
+                        state: d.clone(),
+                        components: comps.clone(),
+                        proxy: state.clone(),
+                    },
                     rocket.shutdown(),
                 ));
             }

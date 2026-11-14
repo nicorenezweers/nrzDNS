@@ -7,6 +7,7 @@ mod auth;
 mod blocking;
 mod cache;
 mod components;
+mod dieter;
 mod integrations;
 mod logs;
 mod mcp;
@@ -37,6 +38,7 @@ pub fn routes() -> Vec<Route> {
     r.extend(proxy::routes());
     r.extend(requests::routes());
     r.extend(settings::routes());
+    r.extend(dieter::routes());
     r.extend(components::routes());
     r.extend(access::routes());
     r.extend(spy::routes());

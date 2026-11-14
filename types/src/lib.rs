@@ -94,6 +94,14 @@
 //! | `POST /components/check` | → [`ComponentsStatus`] (jetzt nach Updates suchen und einspielen) | Admin |
 //! | `POST /components/tunnel` | → [`ComponentsStatus`] (neuen Tunnel über die Cloudflare-API anlegen) | Admin |
 //! | `POST /components/netbird-key` | → [`ComponentsStatus`] (Setup-Key über die NetBird-API erzeugen) | Admin |
+//! | `GET /dieter` | → [`DieterStatus`] (KI-Assistent: Einstellungen ohne Schlüssel, Gespräche, Vorfälle) | angemeldet |
+//! | `PUT /dieter/settings` | [`DieterSettingsInput`] → [`DieterStatus`] | Admin |
+//! | `POST /dieter/conversations` | [`DieterSendInput`] → [`DieterThread`] (neues Gespräch, Antwort im Hintergrund) | Admin |
+//! | `GET /dieter/conversations/<id>` | → [`DieterThread`] | angemeldet |
+//! | `POST /dieter/conversations/<id>/messages` | [`DieterSendInput`] → [`DieterThread`] | Admin |
+//! | `DELETE /dieter/conversations/<id>` | → `204` | Admin |
+//! | `POST /dieter/watch` | → [`DieterStatus`] (Überwachung jetzt prüfen) | Admin |
+//! | `POST /dieter/claude/install` | → [`DieterStatus`] (Claude CLI laden/aktualisieren) | Admin |
 //! | `GET /spy` | → [`SpyStatus`] (laufender Scan, eigene Domains, letzte Berichte) | angemeldet |
 //! | `POST /spy/scan` | [`SpyScanInput`] → [`SpyStatus`] (Scan im Hintergrund; aktiv nur für eigene Domains) | Admin |
 //! | `GET /spy/report?domain=&at=` | → [`SpyReport`] (ein Bericht aus dem Verlauf) | angemeldet |
@@ -116,10 +124,12 @@
 use serde::{Deserialize, Serialize};
 
 mod access;
+mod dieter;
 mod spy;
 mod tls;
 mod tools;
 pub use access::*;
+pub use dieter::*;
 pub use spy::*;
 pub use tls::*;
 pub use tools::*;

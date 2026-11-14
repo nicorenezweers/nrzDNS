@@ -4,6 +4,7 @@ pub mod access;
 pub mod blocking;
 pub mod components;
 pub mod dashboard;
+pub mod dieter;
 pub mod domains;
 pub mod integrations;
 pub mod mcp;

@@ -168,7 +168,7 @@ impl Default for Components {
 
 // ------------------------------------------------------------------ Dateien und Versionen
 
-fn bin_dir(data: &Path) -> PathBuf {
+pub(crate) fn bin_dir(data: &Path) -> PathBuf {
     data.join("bin")
 }
 
@@ -180,7 +180,7 @@ fn versions_file(data: &Path) -> PathBuf {
     bin_dir(data).join("versions.json")
 }
 
-fn versions(data: &Path) -> BTreeMap<String, String> {
+pub(crate) fn versions(data: &Path) -> BTreeMap<String, String> {
     std::fs::read_to_string(versions_file(data))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -195,7 +195,7 @@ fn set_version(data: &Path, name: &str, version: &str) -> AppResult<()> {
         .map_err(|e| AppError::Config(format!("versions.json: {e}")))
 }
 
-fn arch() -> &'static str {
+pub(crate) fn arch() -> &'static str {
     match std::env::consts::ARCH {
         "aarch64" => "arm64",
         "arm" => "arm",
@@ -204,7 +204,7 @@ fn arch() -> &'static str {
 }
 
 /// Stammzertifikate als PEM für die Go-Programme (der Container hat keinen Speicher).
-fn ca_bundle(data: &Path) -> AppResult<PathBuf> {
+pub(crate) fn ca_bundle(data: &Path) -> AppResult<PathBuf> {
     let path = bin_dir(data).join("ca-certificates.pem");
     if path.exists() {
         return Ok(path);
@@ -313,6 +313,7 @@ async fn latest_release(config: &Config, name: &str) -> AppResult<(String, Strin
     ))
 }
 
+#[cfg(test)]
 fn sha256_hex(data: &[u8]) -> String {
     ring::digest::digest(&ring::digest::SHA256, data)
         .as_ref()
@@ -322,32 +323,67 @@ fn sha256_hex(data: &[u8]) -> String {
 }
 
 /// Herunterladen, prüfen, entpacken, ersetzen.
-async fn install(data: &Path, name: &str, url: &str, sha: &str, version: &str) -> AppResult<()> {
+pub(crate) async fn install(
+    data: &Path,
+    name: &str,
+    url: &str,
+    sha: &str,
+    version: &str,
+) -> AppResult<()> {
+    use std::io::Write;
+    const LIMIT: u64 = 1024 * 1024 * 1024;
     let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(300))
+        .timeout(Duration::from_secs(1800))
         .user_agent(concat!("nrzNetwork/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| AppError::Config(e.to_string()))?;
-    let bytes = http
+    let mut resp = http
         .get(url)
         .send()
         .await
         .and_then(reqwest::Response::error_for_status)
-        .map_err(|e| AppError::BadGateway(format!("Download {name}: {e}")))?
-        .bytes()
-        .await
         .map_err(|e| AppError::BadGateway(format!("Download {name}: {e}")))?;
-    if bytes.len() > 300 * 1024 * 1024 {
-        return Err(AppError::BadGateway(format!("Download {name}: zu gross")));
+    let dir = bin_dir(data);
+    std::fs::create_dir_all(&dir).map_err(|e| AppError::Config(e.to_string()))?;
+    // Direkt auf die Platte, Prüfsumme nebenbei (grosse Programme wie die Claude CLI)
+    let download = dir.join(format!("{name}.download"));
+    let mut file = std::fs::File::create(&download)
+        .map_err(|e| AppError::Config(format!("{}: {e}", download.display())))?;
+    let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut total: u64 = 0;
+    loop {
+        let chunk = resp
+            .chunk()
+            .await
+            .map_err(|e| AppError::BadGateway(format!("Download {name}: {e}")))?;
+        let Some(chunk) = chunk else { break };
+        total += chunk.len() as u64;
+        if total > LIMIT {
+            let _ = std::fs::remove_file(&download);
+            return Err(AppError::BadGateway(format!("Download {name}: zu gross")));
+        }
+        digest.update(&chunk);
+        file.write_all(&chunk)
+            .map_err(|e| AppError::Config(format!("{}: {e}", download.display())))?;
     }
-    if !sha.is_empty() && !sha256_hex(&bytes).eq_ignore_ascii_case(sha) {
+    drop(file);
+    let got: String = digest
+        .finish()
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    if !sha.is_empty() && !got.eq_ignore_ascii_case(sha) {
+        let _ = std::fs::remove_file(&download);
         return Err(AppError::BadGateway(format!(
             "Download {name}: Prüfsumme stimmt nicht – nicht installiert."
         )));
     }
-    let program: Vec<u8> = if url.ends_with(".tar.gz") {
-        let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(&bytes[..]));
-        let mut found = None;
+    let tmp = dir.join(format!("{name}.new"));
+    if url.ends_with(".tar.gz") {
+        let f = std::fs::File::open(&download).map_err(|e| AppError::Config(e.to_string()))?;
+        let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(f));
+        let mut found = false;
         for entry in archive
             .entries()
             .map_err(|e| AppError::BadGateway(format!("{name}: {e}")))?
@@ -355,22 +391,23 @@ async fn install(data: &Path, name: &str, url: &str, sha: &str, version: &str) -
             let mut entry = entry.map_err(|e| AppError::BadGateway(format!("{name}: {e}")))?;
             let path = entry.path().map(|p| p.to_path_buf()).unwrap_or_default();
             if path.file_name().and_then(|f| f.to_str()) == Some(name) {
-                let mut buf = Vec::new();
-                std::io::Read::read_to_end(&mut entry, &mut buf)
+                let mut out =
+                    std::fs::File::create(&tmp).map_err(|e| AppError::Config(e.to_string()))?;
+                std::io::copy(&mut entry, &mut out)
                     .map_err(|e| AppError::BadGateway(format!("{name}: {e}")))?;
-                found = Some(buf);
+                found = true;
                 break;
             }
         }
-        found.ok_or_else(|| AppError::BadGateway(format!("{name}: Programm fehlt im Archiv")))?
+        let _ = std::fs::remove_file(&download);
+        if !found {
+            return Err(AppError::BadGateway(format!(
+                "{name}: Programm fehlt im Archiv"
+            )));
+        }
     } else {
-        bytes.to_vec()
-    };
-    let dir = bin_dir(data);
-    std::fs::create_dir_all(&dir).map_err(|e| AppError::Config(e.to_string()))?;
-    let tmp = dir.join(format!("{name}.new"));
-    std::fs::write(&tmp, &program)
-        .map_err(|e| AppError::Config(format!("{}: {e}", tmp.display())))?;
+        std::fs::rename(&download, &tmp).map_err(|e| AppError::Config(e.to_string()))?;
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -379,7 +416,12 @@ async fn install(data: &Path, name: &str, url: &str, sha: &str, version: &str) -
     }
     std::fs::rename(&tmp, dir.join(name)).map_err(|e| AppError::Config(e.to_string()))?;
     set_version(data, name, version)?;
-    tracing::info!(component = name, version, "Komponente installiert");
+    tracing::info!(
+        component = name,
+        version,
+        bytes = total,
+        "Komponente installiert"
+    );
     Ok(())
 }
 

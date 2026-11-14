@@ -4,6 +4,7 @@ pub mod blocking;
 pub mod cache;
 pub mod dashboard;
 pub mod devices;
+pub mod dieter;
 pub mod domains;
 pub mod layout;
 pub mod logs;

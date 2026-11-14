@@ -20,6 +20,7 @@ use pages::blocking::Blocking;
 use pages::cache::Cache;
 use pages::dashboard::Dashboard;
 use pages::devices::Devices;
+use pages::dieter::Dieter;
 use pages::domains::Domains;
 use pages::layout::AppLayout;
 use pages::logs::Logs;
@@ -84,6 +85,8 @@ pub enum Route {
         Spy {},
         #[route("/monitor")]
         Monitor {},
+        #[route("/dieter")]
+        Dieter {},
         #[route("/tools")]
         Tools {},
         #[route("/resolve?:name&:qtype")]
