@@ -32,7 +32,7 @@ pub fn Account() -> Element {
     };
     let changed = name().trim() != me.display_name.trim();
     rsx! {
-        Section { title: tr("Profil"), description: tr("Dein Konto in dieser nrzDNS-Instanz."),
+        Section { title: tr("Profil"), description: tr("Dein Konto in dieser nrzNetwork-Instanz."),
             div { class: "grid grid-cols-1 max-w-xl gap-5",
                 dl { class: "grid grid-cols-[8rem_1fr] gap-y-2 text-sm",
                     dt { class: "text-muted-foreground", {tr("Benutzername")} }

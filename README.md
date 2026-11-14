@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="static/icon.png" width="96" alt="nrzDNS">
+<img src="static/icon.png" width="96" alt="nrzNetwork">
 
-# nrzDNS
+# nrzNetwork
 
 **A self-hosted DNS server inspired by Technitium DNS Server, written in Rust.**
 
@@ -10,7 +10,7 @@
 
 </div>
 
-nrzDNS answers the DNS queries of your whole network from one small program. It is authoritative for your own zones (`home.arpa`, `example.com`, reverse zones), sends everything else to the upstream servers you choose — classic UDP/TCP or encrypted over TLS and HTTPS — caches the answers, and blocks ads, trackers and malware with blocklists and your own rules. Every query lands in a searchable query log, and the dashboard shows what your devices are asking. Settings, zones, lists and the log live in one SQLite file. The web interface is a Rust/WebAssembly app (Dioxus) in a calm gray theme and also works on phones.
+nrzNetwork answers the DNS queries of your whole network from one small program. It is authoritative for your own zones (`home.arpa`, `example.com`, reverse zones), sends everything else to the upstream servers you choose — classic UDP/TCP or encrypted over TLS and HTTPS — caches the answers, and blocks ads, trackers and malware with blocklists and your own rules. Every query lands in a searchable query log, and the dashboard shows what your devices are asking. Settings, zones, lists and the log live in one SQLite file. The web interface is a Rust/WebAssembly app (Dioxus) in a calm gray theme and also works on phones.
 
 ## Features
 
@@ -26,8 +26,10 @@ nrzDNS answers the DNS queries of your whole network from one small program. It 
 | **Dashboard** | Totals, a **chart** over the last hour, day, week or month, **top clients, top domains, top blocked domains** and query types, server status with uptime, queries per second, cache size and upstream health. |
 | **DNS client** | Ask this server (with zones, blocking and cache) or any other server over UDP, TCP, DoT or DoH, for any record type — with flags, answer, authority and additional sections. |
 | **MCP server** | **Model Context Protocol** at `/mcp` for [nrzDashboard](#mcp-server-nrzdashboard) and other MCP clients: all figures for an overview in one call, statistics, query log, server and blocking state — and, if the admin allows it, turn filters on/off, pause them, switch blocklists, add rules, flush the cache. |
-| **Reverse proxy** | Names instead of IP and port: `music.nrz.ch` → `http://100.78.107.162:8350`, `bench.nrz.ch` → `http://100.78.107.162:8550`. nrzDNS answers the name itself with the address of the proxy, and the built-in HTTP proxy forwards by `Host` header — streaming, WebSockets, redirects rewritten. You don't need to own the domain; it works on every device that uses nrzDNS. HTTP only. |
-| **DoH endpoint** | nrzDNS itself answers **DNS over HTTPS** (RFC 8484) at `/dns-query`, `GET` and `POST`, and can be switched off. |
+| **Reverse proxy** | Names instead of IP and port: `music.nrz.ch` → `http://100.78.107.162:8350`, `bench.nrz.ch` → `http://100.78.107.162:8550`. nrzNetwork answers the name itself with the address of the proxy, and the built-in HTTP proxy forwards by `Host` header — streaming, WebSockets, redirects rewritten. You don't need to own the domain; it works on every device that uses nrzNetwork. HTTP only. |
+| **Block page** | Blocked domains can point at nrzNetwork itself (block mode *block page*, the default): `http://` sites show "This site was blocked by nrzNetwork" with buttons to **unlock it for a while** (15 min, 1 h, 4 h – configurable) and a form to **ask for permanent access**; the admin approves or rejects requests under *Allowed*. Unlocks end by themselves. |
+| **Devices & network tools** | Every device that asks nrzNetwork, with queries, blocked share and last seen — give devices names. **Ping** (ICMP, TCP fallback), **port check**, **HTTP check** (status, time, redirects, headers) and a **subnet calculator**. |
+| **DoH endpoint** | nrzNetwork itself answers **DNS over HTTPS** (RFC 8484) at `/dns-query`, `GET` and `POST`, and can be switched off. |
 | **Protection** | **Rate limiting** per client (queries per second), private reverse lookups (`192.168.x.x`, `10.x.x.x`, `fc00::/7`, …) are not sent to the internet, optional empty answers for AAAA in networks without IPv6. |
 | **Multi-user** | The **first account becomes the administrator**. **Admins** change everything; **members** see the dashboard, zones, lists, cache, log and DNS client but only change their own account. Registration can be opened or closed. |
 | **Languages** | Deutsch and English |
@@ -41,14 +43,14 @@ You need Docker. The image contains the program and the web interface.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.2.0
+  ghcr.io/nicorenezweers/nrz-dns:1.3.0
 ```
 
 The image is multi-arch (`linux/amd64`, `linux/arm64`) and is published for every [release](https://github.com/nicorenezweers/nrzDNS/releases). To build it yourself instead:
 
 ```bash
 git clone https://github.com/nicorenezweers/nrzDNS.git
-cd nrzDNS
+cd nrzNetwork
 docker build -t nrzdns .
 ```
 
@@ -61,7 +63,7 @@ Open <http://localhost:8380>. The first account you create becomes the administr
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.2.0   # or: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.3.0   # or: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -95,10 +97,10 @@ The container runs as user `1000` without any capabilities. Docker (20.10 and la
 Every [release](https://github.com/nicorenezweers/nrzDNS/releases) has the program for Linux (`amd64`, `arm64`) as a single file, with `SHA256SUMS`. It brings its own root certificates for DoT, DoH and blocklist downloads.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.2.0/nrzdns-1.2.0-linux-amd64
-chmod +x nrzdns-1.2.0-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.2.0-linux-amd64   # allow port 53 without root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.2.0-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.3.0/nrzdns-1.3.0-linux-amd64
+chmod +x nrzdns-1.3.0-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.3.0-linux-amd64   # allow port 53 without root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.3.0-linux-amd64
 ```
 
 To try it without touching port 53, let it listen elsewhere, e.g. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, and ask it with `dig @127.0.0.1 -p 5353 example.com`.
@@ -106,7 +108,7 @@ To try it without touching port 53, let it listen elsewhere, e.g. `NRZDNS_DNS_LI
 ### Both architectures
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.2.0 --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.3.0 --push .
 ```
 
 Rust is cross-compiled, not emulated, so the arm64 build is fast on an x86 machine and vice versa. Only the program, gzipped per architecture (for the Umbrel app): `scripts/store-binaries.sh <folder>`.
@@ -117,16 +119,16 @@ Rust is cross-compiled, not emulated, so the arm64 build is fast on an x86 machi
 2. **Choose upstream servers** (*Settings → Forwarding*): keep the default (Cloudflare and Quad9 over UDP) or pick a preset, e.g. Quad9 over DoH, and a strategy.
 3. **Turn on blocking** (*Blocking*): add one or two preset lists, e.g. *HaGeZi Multi Normal*. They load immediately and update every 24 hours.
 4. **Add your own names** (*Zones*): create a zone such as `home.arpa` and add `nas`, `printer` and friends as A records — or import an existing BIND zone file. For names your router knows (e.g. `fritz.box`), add a forwarder zone that points at the router.
-5. **Point your network at nrzDNS** — see below.
+5. **Point your network at nrzNetwork** — see below.
 6. **Watch it work**: the dashboard and the query log show every query; the DNS client answers "what does this name resolve to?".
 
-## Using nrzDNS in your network
+## Using nrzNetwork in your network
 
-- **Whole network**: in your router's DHCP settings, set the DNS server handed to clients to the IP address of the machine running nrzDNS (e.g. `192.168.1.10`). Devices pick it up the next time they renew their lease (reconnect Wi-Fi or restart). Give that machine a fixed IP address first.
+- **Whole network**: in your router's DHCP settings, set the DNS server handed to clients to the IP address of the machine running nrzNetwork (e.g. `192.168.1.10`). Devices pick it up the next time they renew their lease (reconnect Wi-Fi or restart). Give that machine a fixed IP address first.
 - **Single device**: set the DNS server in the device's network settings to that IP address.
 - **Check**: `nslookup example.com 192.168.1.10` or `dig @192.168.1.10 example.com`; the query appears in the log.
 - **DNS over HTTPS**: `https://<your-host>/dns-query` works for browsers and phones once the web interface is reachable via HTTPS (reverse proxy with a certificate); over plain HTTP it is useful for testing only.
-- Keep a second DNS server out of the DHCP settings (or point it at another nrzDNS), otherwise devices bypass blocking and your local names whenever they like.
+- Keep a second DNS server out of the DHCP settings (or point it at another nrzNetwork), otherwise devices bypass blocking and your local names whenever they like.
 
 ## Configuration
 
@@ -137,10 +139,12 @@ Start-up settings come from environment variables with the prefix `NRZDNS_` (or 
 | `NRZDNS_DATA_DIR` | `./data` (`/data` in the image) | Folder for `nrzdns.db` |
 | `NRZDNS_PORT` / `NRZDNS_ADDRESS` | `8380` / `0.0.0.0` | Where the web interface, the API and `/dns-query` listen |
 | `NRZDNS_DNS_LISTEN` | `0.0.0.0:53` | DNS socket addresses (UDP and TCP each), comma-separated, e.g. `0.0.0.0:53,[::]:53` |
+| `NRZDNS_HOST_GATEWAY` | – | Name under which the container reaches the device itself (`host.docker.internal`); targets on an address of this device are connected through it |
+| `NRZDNS_PROXY_FALLBACK` | – | Where names without an entry, IP addresses and `.local` names go, e.g. `http://host.docker.internal:80` (umbrelOS) |
 | `NRZDNS_PROXY_LISTEN` | `0.0.0.0:80` | Addresses of the reverse proxy (HTTP), comma-separated; empty = off. On another port names need it: `http://music.nrz.ch:8480/` |
 | `NRZDNS_CONFIG` | `Rocket.toml` (`/app/Rocket.toml` in the image) | Path of the configuration file |
 | `NRZDNS_COOKIE_SECURE` | `false` | Set to `true` when the web interface is served via HTTPS |
-| `NRZDNS_IP_HEADER` | `X-Real-IP` | Header in which a reverse proxy passes the client address (login throttling); `false` when nrzDNS is reachable directly |
+| `NRZDNS_IP_HEADER` | `X-Real-IP` | Header in which a reverse proxy passes the client address (login throttling); `false` when nrzNetwork is reachable directly |
 | `NRZDNS_MCP_TOKEN` | – | Fixed token for the MCP server (at least 16 characters); otherwise create one under *Settings → MCP* |
 | `NRZDNS_LOG` | `info` | Log filter, e.g. `debug` or `info,nrzdns_engine=debug` |
 
@@ -151,21 +155,21 @@ Start-up settings come from environment variables with the prefix `NRZDNS_` (or 
 | General | Server name `ns.nrzdns.local` (SOA/NS of new zones), default TTL 3600 s, DoH on, rate limit off, private reverse lookups answered locally, AAAA answers on |
 | Forwarding | Cloudflare `1.1.1.1` and Quad9 `9.9.9.9` over UDP, sequential, 2000 ms timeout per upstream |
 | Cache | On, 50 000 entries, TTL between 10 s and 1 day, negative answers 300 s, serve-stale up to 1 day, prefetch on |
-| Blocking | On, answer `0.0.0.0` / `::` with TTL 60 s, lists updated every 24 hours |
+| Blocking | On, block page (address of this device; `0.0.0.0` while none is known), TTL 60 s, lists updated every 24 hours |
 | Query log | On, kept for 30 days |
 
 ## Reverse proxy
 
 *Reverse Proxy* in the sidebar (admins): add a name and a target, e.g. `music.nrz.ch` → `http://100.78.107.162:8350` and `bench.nrz.ch` → `http://100.78.107.162:8550`. From then on:
 
-1. nrzDNS answers `music.nrz.ch` itself (A record, TTL 60 s) with the address of the device it runs on — the address under *DNS answer*, or, if that is empty, the IP from the target.
+1. nrzNetwork answers `music.nrz.ch` itself (A record, TTL 60 s) with the address of the device it runs on — the address under *DNS answer*, or, if that is empty, the IP from the target.
 2. The browser connects to port 80 of that device; the built-in proxy picks the target by the `Host` header and forwards the request (keeps `Host`, adds `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Host`, `X-Forwarded-Proto`; streams bodies; passes WebSockets; rewrites `Location: http://100.78.107.162:8350/…` to `http://music.nrz.ch/…`).
 
-You don't have to own the domain — the names only exist for devices that ask nrzDNS. That is also why it is HTTP only: no public certificate can be issued for a name you don't own. An existing zone such as `nrz.ch` keeps working; the proxy name wins because it is more specific. Unknown names get a short 404 page from the proxy, unreachable targets a 502 page.
+You don't have to own the domain — the names only exist for devices that ask nrzNetwork. That is also why it is HTTP only: no public certificate can be issued for a name you don't own. An existing zone such as `nrz.ch` keeps working; the proxy name wins because it is more specific. Unknown names get a short 404 page from the proxy, unreachable targets a 502 page.
 
 ## MCP server (nrzDashboard)
 
-nrzDNS speaks the [Model Context Protocol](https://modelcontextprotocol.io) at `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, stateless, answers as `application/json`). That is how nrzDashboard gets the values for its overview — and any other MCP client works too.
+nrzNetwork speaks the [Model Context Protocol](https://modelcontextprotocol.io) at `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, stateless, answers as `application/json`). That is how nrzDashboard gets the values for its overview — and any other MCP client works too.
 
 1. *Settings → MCP* (admins): **Create token** and copy it (it is shown only once). Or set `NRZDNS_MCP_TOKEN`.
 2. In the client: URL `http://<host>:8380/mcp`, header `Authorization: Bearer <token>`.
@@ -195,12 +199,13 @@ curl -s http://localhost:8380/mcp -H "Authorization: Bearer $TOKEN" -H 'Content-
 
 ## Umbrel
 
-nrzDNS is available in the community app store **nrzStore** (app `nrzDNS`, ID `nrz-dns`). The web interface opens on port `8400`; nrzDNS has its own login, so the Umbrel login in front of it is switched off. DNS is published on port `53` (UDP and TCP) of the Umbrel device, so:
+nrzNetwork is available in the community app store **nrzStore** (app `nrzNetwork`, ID `nrz-dns`). The web interface opens on port `8400`; nrzNetwork has its own login, so the Umbrel login in front of it is switched off. DNS is published on port `53` (UDP and TCP) of the Umbrel device, so:
 
 - **Port 53 has to be free** on the device — don't run Technitium, Pi-hole or AdGuard Home at the same time. Otherwise the installation fails with `app-script install … exit code 1`; stop or uninstall the other DNS server first.
-- **Coming from Technitium:** export each zone in Technitium (*Zones → Export Zone*) and import it in nrzDNS under *Zonen → Importieren*; add your blocklist URLs, blocked and allowed domains again. If your router already points at the Umbrel, nothing changes there — nrzDNS takes over the same address.
+- **Coming from Technitium:** export each zone in Technitium (*Zones → Export Zone*) and import it in nrzNetwork under *Zonen → Importieren*; add your blocklist URLs, blocked and allowed domains again. If your router already points at the Umbrel, nothing changes there — nrzNetwork takes over the same address.
 - Point your router's DHCP DNS setting (or single devices) at the **IP address of your Umbrel**.
-- The **reverse proxy** listens on port `81`, because port 80 belongs to umbrelOS itself: open names as `http://music.nrz.ch:81/`.
+- **Names without a port:** port 80 belongs to umbrelOS. A small watchdog that the app starts on the device (`hooks/nrznetwork-gateway`) points port 80 of the LAN and VPN addresses at the proxy (port `81`) as long as the proxy answers; everything without an entry — including the umbrelOS interface — is passed on to umbrelOS unchanged. If the proxy stops answering, umbrelOS gets port 80 back within seconds. Switch it off under *Reverse proxy → Device and block page*.
+- Targets on the Umbrel itself (e.g. `http://100.78.107.162:8400`) are reached through `host.docker.internal`; the addresses of the device (LAN, NetBird/Tailscale) are detected automatically, and every client gets the matching one.
 
 Data lives in `app-data/nrz-dns/data`. The app ships the program for `amd64` and `arm64` inside the store and runs it in the official `debian:trixie-slim` image as user `1000`, without capabilities.
 
@@ -227,4 +232,4 @@ The JSON API lives under `/api/v1`; the endpoint table is the doc comment of [`t
 
 ## License
 
-AGPL-3.0-or-later. nrzDNS is an independent project inspired by [Technitium DNS Server](https://technitium.com/dns/) and shares no code with it. The UI components are based on [rust-ui](https://github.com/rust-ui/ui) (MIT), the font is [Inter](https://rsms.me/inter/) (OFL).
+AGPL-3.0-or-later. nrzNetwork is an independent project inspired by [Technitium DNS Server](https://technitium.com/dns/) and shares no code with it. The UI components are based on [rust-ui](https://github.com/rust-ui/ui) (MIT), the font is [Inter](https://rsms.me/inter/) (OFL).

@@ -71,6 +71,17 @@
 //! | `POST /proxy/hosts` | [`ProxyHostInput`] → [`ProxyHost`] | Admin |
 //! | `PUT /proxy/hosts/<id>` | [`ProxyHostInput`] → [`ProxyHost`] | Admin |
 //! | `DELETE /proxy/hosts/<id>` | → `204` | Admin |
+//! | `GET /unlocks` | → `Vec<`[`TempUnlock`]`>` (auf Zeit freigeschaltet, über die Sperrseite) | angemeldet |
+//! | `DELETE /unlocks/<domain>` | → `204` (Freischaltung beenden) | Admin |
+//! | `GET /requests` | → `Vec<`[`AllowRequest`]`>` (Anträge auf Ausnahmen, offene zuerst) | angemeldet |
+//! | `POST /requests/<id>/approve` | → [`AllowRequest`] (Domain kommt in die Ausnahmen) | Admin |
+//! | `POST /requests/<id>/reject` | → [`AllowRequest`] | Admin |
+//! | `DELETE /requests/<id>` | → `204` | Admin |
+//! | `POST /tools/ping` | [`PingInput`] → [`PingResult`] (ICMP, sonst TCP) | angemeldet |
+//! | `POST /tools/ports` | [`PortsInput`] → [`PortsResult`] | angemeldet |
+//! | `POST /tools/http` | [`HttpCheckInput`] → [`HttpCheckResult`] | angemeldet |
+//! | `GET /devices?days=` | → `Vec<`[`Device`]`>` (Geräte aus dem Abfrageprotokoll, 1–30 Tage) | angemeldet |
+//! | `PUT /devices/<ip>` | [`DeviceNameInput`] → [`Device`] (Name, leer = löschen) | Admin |
 //!
 //! **MCP-Server** (Model Context Protocol, Streamable HTTP, JSON-RPC 2.0) unter `POST /mcp`, mit
 //! `Authorization: Bearer <Token>` – für nrzDashboard und andere MCP-Clients: Übersicht,
@@ -81,6 +92,9 @@
 //! [`DnsSettings::doh_enabled`].
 
 use serde::{Deserialize, Serialize};
+
+mod tools;
+pub use tools::*;
 
 // ------------------------------------------------------------------ Fehler
 
@@ -430,12 +444,15 @@ pub enum BlockMode {
     /// `NXDOMAIN` – die Domain gibt es nicht.
     NxDomain,
     /// `0.0.0.0` bzw. `::` (andere Typen: leere Antwort).
-    #[default]
     NullAddress,
     /// Eigene Adressen aus [`DnsSettings::block_ipv4`] / [`DnsSettings::block_ipv6`], z. B. eine Sperrseite.
     CustomAddress,
     /// `REFUSED`.
     Refused,
+    /// Adresse dieses Geräts: Browser landen bei `http://` auf der Sperrseite von nrzNetwork
+    /// (freischalten auf Zeit, Ausnahme beantragen). Ohne bekannte Adresse wie `0.0.0.0`.
+    #[default]
+    BlockPage,
 }
 
 /// Alle Einstellungen des DNS-Servers. Gespeichert als JSON, die Engine übernimmt sie sofort.
@@ -523,7 +540,7 @@ impl Default for DnsSettings {
             serve_stale_secs: 86_400,
             prefetch: true,
             blocking_enabled: true,
-            block_mode: BlockMode::NullAddress,
+            block_mode: BlockMode::BlockPage,
             block_ipv4: "0.0.0.0".into(),
             block_ipv6: "::".into(),
             block_ttl: 60,
@@ -1361,13 +1378,82 @@ impl Default for ProxyHostInput {
     }
 }
 
-/// Einstellungen des Reverse Proxys.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// Einstellungen des Reverse Proxys und der Sperrseite.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProxySettings {
-    /// IP-Adresse des Geräts, auf dem nrzDNS läuft – damit beantwortet nrzDNS die Namen
-    /// der Proxy-Einträge. Leer = die Adresse aus dem Ziel (wenn dort eine IP steht).
+    /// IP-Adressen dieses Geräts, durch Kommas getrennt (z. B. `192.168.0.198, 100.78.107.162`)
+    /// – damit beantwortet nrzNetwork die Namen der Proxy-Einträge und gesperrte Domains im
+    /// Modus Sperrseite, je Client die passende. Leer = automatisch erkannte Adressen, sonst
+    /// die IP aus dem Ziel.
     pub address: String,
+    /// Auf der Sperrseite darf jeder eine Domain für eine Weile freischalten.
+    pub allow_unlock: bool,
+    /// Wählbare Zeiträume in Minuten (1–1440).
+    pub unlock_minutes: Vec<u32>,
+    /// Auf der Sperrseite darf jeder eine dauerhafte Ausnahme beantragen (der Admin entscheidet).
+    pub allow_requests: bool,
+    /// Umbrel: Port 80 des Geräts an den Proxy geben (Namen ohne Port); alles Unbekannte geht
+    /// weiter an umbrelOS.
+    pub port80: bool,
+}
+
+impl Default for ProxySettings {
+    fn default() -> Self {
+        Self {
+            address: String::new(),
+            allow_unlock: true,
+            unlock_minutes: vec![15, 60, 240],
+            allow_requests: true,
+            port80: true,
+        }
+    }
+}
+
+/// Zustand der Port-80-Weiterleitung auf dem Gerät (Umbrel-Wächter).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GatewayStatus {
+    /// Port 80 zeigt gerade auf den Proxy.
+    pub active: bool,
+    pub message: String,
+    /// Letzte Meldung des Wächters (Unix-Sekunden).
+    pub updated_at: i64,
+}
+
+/// Für eine Weile freigeschaltete Domain (von der Sperrseite).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TempUnlock {
+    pub domain: String,
+    /// Gilt bis (Unix-Sekunden).
+    pub until: i64,
+    /// Wer freigeschaltet hat (IP-Adresse).
+    pub client: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RequestStatus {
+    #[default]
+    Pending,
+    Approved,
+    Rejected,
+}
+
+/// Antrag auf eine dauerhafte Ausnahme (von der Sperrseite).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AllowRequest {
+    pub id: i64,
+    pub domain: String,
+    pub client: String,
+    pub reason: String,
+    pub status: RequestStatus,
+    pub created_at: i64,
+    pub decided_at: Option<i64>,
+    pub decided_by: String,
 }
 
 /// `GET /proxy`
@@ -1382,6 +1468,10 @@ pub struct ProxyStatus {
     pub listen_errors: Vec<String>,
     pub settings: ProxySettings,
     pub hosts: Vec<ProxyHost>,
+    /// Adressen dieses Geräts, mit denen nrzNetwork antwortet (eingetragen oder erkannt).
+    pub device_addresses: Vec<String>,
+    /// Port-80-Weiterleitung (nur auf Umbrel, sonst `None`).
+    pub gateway: Option<GatewayStatus>,
 }
 
 #[cfg(test)]

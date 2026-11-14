@@ -267,7 +267,7 @@ const TOOLS: &[Tool] = &[
     Tool {
         name: "get_statistics",
         title: "Statistiken",
-        description: "Vollständige Statistik wie das Dashboard von nrzDNS: Summen, Zeitreihe \
+        description: "Vollständige Statistik wie das Dashboard von nrzNetwork: Summen, Zeitreihe \
             (Anfragen, gesperrt, Cache, weitergeleitet, eigene Zonen, Fehler je Abschnitt), \
             Top 10 Clients, Domains, gesperrte Domains und Abfragetypen, Serverzustand.",
         changes: false,
@@ -634,7 +634,7 @@ pub async fn call(ctx: &Ctx<'_>, name: &str, arguments: &Value) -> ToolResult {
         .ok_or_else(|| ToolError::Unknown(format!("Unbekanntes Werkzeug: {name}")))?;
     if tool.changes && !ctx.allow_changes {
         return Err(ToolError::Failed(
-            "Änderungen über MCP sind ausgeschaltet (nrzDNS → Einstellungen → MCP).".into(),
+            "Änderungen über MCP sind ausgeschaltet (nrzNetwork → Einstellungen → MCP).".into(),
         ));
     }
     let result = run(ctx, name, arguments).await;

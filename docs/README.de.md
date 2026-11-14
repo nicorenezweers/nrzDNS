@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="../static/icon.png" width="96" alt="nrzDNS">
+<img src="../static/icon.png" width="96" alt="nrzNetwork">
 
-# nrzDNS
+# nrzNetwork
 
 **Ein selbst gehosteter DNS-Server nach dem Vorbild von Technitium DNS Server, in Rust.**
 
@@ -10,7 +10,7 @@
 
 </div>
 
-nrzDNS beantwortet die DNS-Anfragen deines ganzen Netzes mit einem kleinen Programm. Für deine eigenen Zonen (`home.arpa`, `example.com`, Rückwärtszonen) antwortet es verbindlich, alles andere fragt es bei vorgelagerten Servern deiner Wahl nach – klassisch über UDP/TCP oder verschlüsselt über TLS und HTTPS –, speichert die Antworten im Cache und sperrt Werbung, Tracker und Schadsoftware mit Sperrlisten und eigenen Regeln. Jede Anfrage landet in einem durchsuchbaren Abfrageprotokoll, und das Dashboard zeigt, was deine Geräte fragen. Einstellungen, Zonen, Listen und Protokoll liegen in einer SQLite-Datei. Die Oberfläche ist eine Rust/WebAssembly-App (Dioxus) in ruhigem Grau und funktioniert auch am Handy.
+nrzNetwork beantwortet die DNS-Anfragen deines ganzen Netzes mit einem kleinen Programm. Für deine eigenen Zonen (`home.arpa`, `example.com`, Rückwärtszonen) antwortet es verbindlich, alles andere fragt es bei vorgelagerten Servern deiner Wahl nach – klassisch über UDP/TCP oder verschlüsselt über TLS und HTTPS –, speichert die Antworten im Cache und sperrt Werbung, Tracker und Schadsoftware mit Sperrlisten und eigenen Regeln. Jede Anfrage landet in einem durchsuchbaren Abfrageprotokoll, und das Dashboard zeigt, was deine Geräte fragen. Einstellungen, Zonen, Listen und Protokoll liegen in einer SQLite-Datei. Die Oberfläche ist eine Rust/WebAssembly-App (Dioxus) in ruhigem Grau und funktioniert auch am Handy.
 
 ## Funktionen
 
@@ -26,8 +26,10 @@ nrzDNS beantwortet die DNS-Anfragen deines ganzen Netzes mit einem kleinen Progr
 | **Dashboard** | Kennzahlen, **Verlaufsdiagramm** über die letzte Stunde, den letzten Tag, die letzte Woche oder den letzten Monat, **Top-Clients, Top-Domains, meistgesperrte Domains** und Anfragetypen, Serverzustand mit Laufzeit, Anfragen je Sekunde, Cache-Grösse und Zustand der Weiterleitungen. |
 | **DNS-Client** | Diesen Server (mit Zonen, Sperren und Cache) oder jeden anderen über UDP, TCP, DoT oder DoH fragen, für jeden Eintragstyp – mit Flags, Antwort-, Authority- und Additional-Abschnitt. |
 | **MCP-Server** | **Model Context Protocol** unter `/mcp` für [nrzDashboard](#mcp-server-nrzdashboard) und andere MCP-Clients: alle Kennzahlen für eine Übersicht in einem Aufruf, Statistiken, Abfrageprotokoll, Zustand von Server und Sperren – und, wenn der Admin es erlaubt, Filter ein-/ausschalten, pausieren, Sperrlisten umschalten, Regeln anlegen, Cache leeren. |
-| **Reverse Proxy** | Namen statt IP und Port: `music.nrz.ch` → `http://100.78.107.162:8350`, `bench.nrz.ch` → `http://100.78.107.162:8550`. nrzDNS beantwortet den Namen selbst mit der Adresse des Proxys, der eingebaute HTTP-Proxy reicht nach dem `Host`-Header weiter – mit Streaming, WebSockets und umgeschriebenen Weiterleitungen. Die Domain muss dir nicht gehören; es klappt auf allen Geräten, die nrzDNS benutzen. Nur HTTP. |
-| **DoH-Endpunkt** | nrzDNS beantwortet selbst **DNS über HTTPS** (RFC 8484) unter `/dns-query`, `GET` und `POST`, abschaltbar. |
+| **Reverse Proxy** | Namen statt IP und Port: `music.nrz.ch` → `http://100.78.107.162:8350`, `bench.nrz.ch` → `http://100.78.107.162:8550`. nrzNetwork beantwortet den Namen selbst mit der Adresse des Proxys, der eingebaute HTTP-Proxy reicht nach dem `Host`-Header weiter – mit Streaming, WebSockets und umgeschriebenen Weiterleitungen. Die Domain muss dir nicht gehören; es klappt auf allen Geräten, die nrzNetwork benutzen. Nur HTTP. |
+| **Sperrseite** | Gesperrte Domains können auf nrzNetwork selbst zeigen (Sperrmodus *Sperrseite*, die Vorgabe): `http://`-Seiten zeigen „Diese Seite wurde durch nrzNetwork gesperrt“ mit Knöpfen zum **Freischalten auf Zeit** (15 Min., 1 Std., 4 Std. – einstellbar) und einem Formular, um eine **dauerhafte Freigabe zu beantragen**; der Admin genehmigt oder lehnt unter *Ausnahmen* ab. Freischaltungen enden von selbst. |
+| **Geräte & Netzwerk-Tools** | Jedes Gerät, das nrzNetwork fragt, mit Anfragen, Anteil gesperrt und zuletzt gesehen – Geräte bekommen Namen. **Ping** (ICMP, sonst TCP), **Port-Check**, **HTTP-Check** (Status, Zeit, Weiterleitungen, Header) und **Subnetz-Rechner**. |
+| **DoH-Endpunkt** | nrzNetwork beantwortet selbst **DNS über HTTPS** (RFC 8484) unter `/dns-query`, `GET` und `POST`, abschaltbar. |
 | **Schutz** | **Rate-Limit** je Client (Anfragen pro Sekunde), Rückwärtsanfragen für private Netze (`192.168.x.x`, `10.x.x.x`, `fc00::/7` …) gehen nicht ins Internet, auf Wunsch leere AAAA-Antworten für Netze ohne IPv6. |
 | **Mehrere Konten** | Das **erste Konto wird Administrator**. **Admins** ändern alles; **Mitglieder** sehen Dashboard, Zonen, Listen, Cache, Protokoll und DNS-Client, ändern aber nur ihr eigenes Konto. Die Registrierung lässt sich öffnen und schliessen. |
 | **Sprachen** | Deutsch und English |
@@ -41,14 +43,14 @@ Du brauchst Docker. Das Image enthält Programm und Oberfläche.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.2.0
+  ghcr.io/nicorenezweers/nrz-dns:1.3.0
 ```
 
 Das Image ist für mehrere Architekturen gebaut (`linux/amd64`, `linux/arm64`) und erscheint mit jedem [Release](https://github.com/nicorenezweers/nrzDNS/releases). Selbst bauen:
 
 ```bash
 git clone https://github.com/nicorenezweers/nrzDNS.git
-cd nrzDNS
+cd nrzNetwork
 docker build -t nrzdns .
 ```
 
@@ -61,7 +63,7 @@ docker build -t nrzdns .
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.2.0   # oder: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.3.0   # oder: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -95,10 +97,10 @@ Der Container läuft als Benutzer `1000` ohne zusätzliche Rechte. Docker (ab 20
 Jedes [Release](https://github.com/nicorenezweers/nrzDNS/releases) enthält das Programm für Linux (`amd64`, `arm64`) als einzelne Datei, dazu `SHA256SUMS`. Die Wurzelzertifikate für DoT, DoH und das Laden der Sperrlisten bringt es selbst mit.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.2.0/nrzdns-1.2.0-linux-amd64
-chmod +x nrzdns-1.2.0-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.2.0-linux-amd64   # Port 53 ohne root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.2.0-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.3.0/nrzdns-1.3.0-linux-amd64
+chmod +x nrzdns-1.3.0-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.3.0-linux-amd64   # Port 53 ohne root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.3.0-linux-amd64
 ```
 
 Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen lassen, z. B. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, und mit `dig @127.0.0.1 -p 5353 example.com` fragen.
@@ -106,7 +108,7 @@ Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen la
 ### Beide Architekturen
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.2.0 --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.3.0 --push .
 ```
 
 Rust wird quer-kompiliert, nicht emuliert – der arm64-Build ist auf einem x86-Rechner also schnell und umgekehrt. Nur das Programm, gzip-komprimiert je Architektur (für die Umbrel-App): `scripts/store-binaries.sh <ordner>`.
@@ -117,16 +119,16 @@ Rust wird quer-kompiliert, nicht emuliert – der arm64-Build ist auf einem x86-
 2. **Vorgelagerte Server wählen** (*Einstellungen → Weiterleitung*): die Vorgabe (Cloudflare und Quad9 über UDP) behalten oder eine Vorlage wählen, z. B. Quad9 über DoH, dazu eine Strategie.
 3. **Sperren einschalten** (*Sperren*): eine oder zwei Vorlagen hinzufügen, z. B. *HaGeZi Multi Normal*. Sie laden sofort und werden alle 24 Stunden neu geladen.
 4. **Eigene Namen eintragen** (*Zonen*): eine Zone wie `home.arpa` anlegen und `nas`, `drucker` usw. als A-Einträge hinzufügen – oder eine vorhandene BIND-Zonendatei importieren. Für Namen, die dein Router kennt (z. B. `fritz.box`), eine Weiterleitungszone auf den Router anlegen.
-5. **Das Netz auf nrzDNS umstellen** – siehe unten.
+5. **Das Netz auf nrzNetwork umstellen** – siehe unten.
 6. **Zuschauen**: Dashboard und Abfrageprotokoll zeigen jede Anfrage; der DNS-Client beantwortet „Wohin zeigt dieser Name?“.
 
-## nrzDNS im Netz benutzen
+## nrzNetwork im Netz benutzen
 
-- **Ganzes Netz**: In den DHCP-Einstellungen des Routers als DNS-Server für die Geräte die IP-Adresse des Rechners mit nrzDNS eintragen (z. B. `192.168.1.10`). Die Geräte übernehmen sie, sobald sie ihre Adresse erneuern (WLAN neu verbinden oder neu starten). Dem Rechner vorher eine feste IP-Adresse geben.
+- **Ganzes Netz**: In den DHCP-Einstellungen des Routers als DNS-Server für die Geräte die IP-Adresse des Rechners mit nrzNetwork eintragen (z. B. `192.168.1.10`). Die Geräte übernehmen sie, sobald sie ihre Adresse erneuern (WLAN neu verbinden oder neu starten). Dem Rechner vorher eine feste IP-Adresse geben.
 - **Einzelnes Gerät**: In den Netzwerkeinstellungen des Geräts diese IP-Adresse als DNS-Server eintragen.
 - **Prüfen**: `nslookup example.com 192.168.1.10` oder `dig @192.168.1.10 example.com`; die Anfrage erscheint im Protokoll.
 - **DNS über HTTPS**: `https://<dein-host>/dns-query` funktioniert für Browser und Handys, sobald die Oberfläche über HTTPS erreichbar ist (Reverse Proxy mit Zertifikat); über einfaches HTTP taugt es nur zum Testen.
-- Keinen zweiten DNS-Server in den DHCP-Einstellungen lassen (oder dort ein zweites nrzDNS eintragen) – sonst umgehen die Geräte Sperren und eigene Namen, wann sie wollen.
+- Keinen zweiten DNS-Server in den DHCP-Einstellungen lassen (oder dort ein zweites nrzNetwork eintragen) – sonst umgehen die Geräte Sperren und eigene Namen, wann sie wollen.
 
 ## Konfiguration
 
@@ -137,10 +139,12 @@ Einstellungen für den Start kommen aus Umgebungsvariablen mit dem Präfix `NRZD
 | `NRZDNS_DATA_DIR` | `./data` (`/data` im Image) | Ordner für `nrzdns.db` |
 | `NRZDNS_PORT` / `NRZDNS_ADDRESS` | `8380` / `0.0.0.0` | Wo Oberfläche, API und `/dns-query` lauschen |
 | `NRZDNS_DNS_LISTEN` | `0.0.0.0:53` | DNS-Adressen (jeweils UDP und TCP), durch Kommas getrennt, z. B. `0.0.0.0:53,[::]:53` |
+| `NRZDNS_HOST_GATEWAY` | – | Name, unter dem der Container das Gerät selbst erreicht (`host.docker.internal`); Ziele auf einer Adresse dieses Geräts verbindet der Proxy darüber |
+| `NRZDNS_PROXY_FALLBACK` | – | Wohin Namen ohne Eintrag, IP-Adressen und `.local`-Namen gehen, z. B. `http://host.docker.internal:80` (umbrelOS) |
 | `NRZDNS_PROXY_LISTEN` | `0.0.0.0:80` | Adressen des Reverse Proxys (HTTP), durch Kommas getrennt; leer = aus. Auf einem anderen Port brauchen die Namen ihn: `http://music.nrz.ch:8480/` |
 | `NRZDNS_CONFIG` | `Rocket.toml` (`/app/Rocket.toml` im Image) | Pfad der Konfigurationsdatei |
 | `NRZDNS_COOKIE_SECURE` | `false` | Auf `true` setzen, wenn die Oberfläche über HTTPS läuft |
-| `NRZDNS_IP_HEADER` | `X-Real-IP` | Kopfzeile, in der ein Reverse Proxy die Adresse des Aufrufers mitschickt (Bremse gegen Passwort-Raten); `false`, wenn nrzDNS direkt erreichbar ist |
+| `NRZDNS_IP_HEADER` | `X-Real-IP` | Kopfzeile, in der ein Reverse Proxy die Adresse des Aufrufers mitschickt (Bremse gegen Passwort-Raten); `false`, wenn nrzNetwork direkt erreichbar ist |
 | `NRZDNS_MCP_TOKEN` | – | Festes Token für den MCP-Server (mindestens 16 Zeichen); sonst unter *Einstellungen → MCP* erzeugen |
 | `NRZDNS_LOG` | `info` | Log-Filter, z. B. `debug` oder `info,nrzdns_engine=debug` |
 
@@ -151,21 +155,21 @@ Einstellungen für den Start kommen aus Umgebungsvariablen mit dem Präfix `NRZD
 | Allgemein | Servername `ns.nrzdns.local` (SOA/NS neuer Zonen), Standard-TTL 3600 s, DoH an, kein Rate-Limit, private Rückwärtsanfragen lokal beantwortet, AAAA-Antworten an |
 | Weiterleitung | Cloudflare `1.1.1.1` und Quad9 `9.9.9.9` über UDP, der Reihe nach, 2000 ms Zeitlimit je Server |
 | Cache | An, 50 000 Einträge, TTL zwischen 10 s und 1 Tag, negative Antworten 300 s, abgelaufene Einträge bis 1 Tag ausliefern, Prefetch an |
-| Sperren | An, Antwort `0.0.0.0` / `::` mit TTL 60 s, Listen alle 24 Stunden neu laden |
+| Sperren | An, Sperrseite (Adresse dieses Geräts; `0.0.0.0`, solange keine bekannt ist), TTL 60 s, Listen alle 24 Stunden neu laden |
 | Abfrageprotokoll | An, 30 Tage aufbewahren |
 
 ## Reverse Proxy
 
 *Reverse Proxy* in der Seitenleiste (Admins): Namen und Ziel eintragen, z. B. `music.nrz.ch` → `http://100.78.107.162:8350` und `bench.nrz.ch` → `http://100.78.107.162:8550`. Ab dann:
 
-1. nrzDNS beantwortet `music.nrz.ch` selbst (A-Eintrag, TTL 60 s) mit der Adresse des Geräts, auf dem es läuft – der Adresse unter *DNS-Antwort* oder, wenn die leer ist, der IP aus dem Ziel.
+1. nrzNetwork beantwortet `music.nrz.ch` selbst (A-Eintrag, TTL 60 s) mit der Adresse des Geräts, auf dem es läuft – der Adresse unter *DNS-Antwort* oder, wenn die leer ist, der IP aus dem Ziel.
 2. Der Browser verbindet sich mit Port 80 dieses Geräts; der eingebaute Proxy wählt das Ziel nach dem `Host`-Header und reicht die Anfrage weiter (`Host` bleibt, dazu `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Host`, `X-Forwarded-Proto`; Inhalte gestreamt; WebSockets durchgereicht; `Location: http://100.78.107.162:8350/…` wird zu `http://music.nrz.ch/…`).
 
-Die Domain muss dir nicht gehören – die Namen gibt es nur für Geräte, die nrzDNS fragen. Darum auch nur HTTP: Für eine fremde Domain gibt es kein öffentliches Zertifikat. Eine vorhandene Zone wie `nrz.ch` läuft weiter; der Proxy-Name gewinnt, weil er genauer ist. Unbekannte Namen bekommen vom Proxy eine kurze 404-Seite, nicht erreichbare Ziele eine 502-Seite.
+Die Domain muss dir nicht gehören – die Namen gibt es nur für Geräte, die nrzNetwork fragen. Darum auch nur HTTP: Für eine fremde Domain gibt es kein öffentliches Zertifikat. Eine vorhandene Zone wie `nrz.ch` läuft weiter; der Proxy-Name gewinnt, weil er genauer ist. Unbekannte Namen bekommen vom Proxy eine kurze 404-Seite, nicht erreichbare Ziele eine 502-Seite.
 
 ## MCP-Server (nrzDashboard)
 
-nrzDNS spricht das [Model Context Protocol](https://modelcontextprotocol.io) unter `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, zustandslos, Antworten als `application/json`). Darüber holt sich nrzDashboard die Werte für seine Übersicht – jeder andere MCP-Client geht genauso.
+nrzNetwork spricht das [Model Context Protocol](https://modelcontextprotocol.io) unter `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, zustandslos, Antworten als `application/json`). Darüber holt sich nrzDashboard die Werte für seine Übersicht – jeder andere MCP-Client geht genauso.
 
 1. *Einstellungen → MCP* (Admins): **Token erzeugen** und kopieren (es wird nur einmal angezeigt). Oder `NRZDNS_MCP_TOKEN` setzen.
 2. Im Client: URL `http://<host>:8380/mcp`, Kopfzeile `Authorization: Bearer <Token>`.
@@ -195,12 +199,13 @@ curl -s http://localhost:8380/mcp -H "Authorization: Bearer $TOKEN" -H 'Content-
 
 ## Umbrel
 
-nrzDNS gibt es im Community-App-Store **nrzStore** (App `nrzDNS`, ID `nrz-dns`). Die Oberfläche öffnet sich auf Port `8400`; nrzDNS hat eine eigene Anmeldung, die Umbrel-Anmeldung davor ist ausgeschaltet. DNS läuft auf Port `53` (UDP und TCP) des Umbrel-Geräts, darum:
+nrzNetwork gibt es im Community-App-Store **nrzStore** (App `nrzNetwork`, ID `nrz-dns`). Die Oberfläche öffnet sich auf Port `8400`; nrzNetwork hat eine eigene Anmeldung, die Umbrel-Anmeldung davor ist ausgeschaltet. DNS läuft auf Port `53` (UDP und TCP) des Umbrel-Geräts, darum:
 
 - **Port 53 muss auf dem Gerät frei sein** – nicht gleichzeitig Technitium, Pi-hole oder AdGuard Home betreiben. Sonst schlägt die Installation mit `app-script install … Exit-Code 1` fehl; den anderen DNS-Server zuerst stoppen oder deinstallieren.
-- **Umzug von Technitium:** in Technitium jede Zone exportieren (*Zones → Export Zone*) und in nrzDNS unter *Zonen → Importieren* einlesen; Sperrlisten, eigene Sperren und Ausnahmen neu eintragen. Zeigt der Router schon auf den Umbrel, ändert sich dort nichts – nrzDNS übernimmt dieselbe Adresse.
+- **Umzug von Technitium:** in Technitium jede Zone exportieren (*Zones → Export Zone*) und in nrzNetwork unter *Zonen → Importieren* einlesen; Sperrlisten, eigene Sperren und Ausnahmen neu eintragen. Zeigt der Router schon auf den Umbrel, ändert sich dort nichts – nrzNetwork übernimmt dieselbe Adresse.
 - In den DHCP-Einstellungen des Routers (oder an einzelnen Geräten) die **IP-Adresse deines Umbrel** als DNS-Server eintragen.
-- Der **Reverse Proxy** läuft auf Port `81`, weil Port 80 umbrelOS selbst gehört: Namen also als `http://music.nrz.ch:81/` öffnen.
+- **Namen ohne Port:** Port 80 gehört umbrelOS. Ein kleiner Wächter, den die App auf dem Gerät startet (`hooks/nrznetwork-gateway`), leitet Port 80 der LAN- und VPN-Adressen an den Proxy (Port `81`), solange der Proxy antwortet; alles ohne Eintrag – auch die umbrelOS-Oberfläche – reicht der Proxy unverändert an umbrelOS weiter. Antwortet der Proxy nicht, bekommt umbrelOS Port 80 innerhalb von Sekunden zurück. Abschalten unter *Reverse Proxy → Gerät und Sperrseite*.
+- Ziele auf dem Umbrel selbst (z. B. `http://100.78.107.162:8400`) erreicht der Proxy über `host.docker.internal`; die Adressen des Geräts (LAN, NetBird/Tailscale) werden erkannt, jeder Client bekommt die passende.
 
 Die Daten liegen unter `app-data/nrz-dns/data`. Die App bringt das Programm für `amd64` und `arm64` im Store mit und startet es im offiziellen Image `debian:trixie-slim` als Benutzer `1000`, ohne zusätzliche Rechte.
 
@@ -227,4 +232,4 @@ Die JSON-API liegt unter `/api/v1`; die Tabelle aller Endpunkte steht im Doc-Kom
 
 ## Lizenz
 
-AGPL-3.0-or-later. nrzDNS ist ein eigenständiges Projekt nach dem Vorbild von [Technitium DNS Server](https://technitium.com/dns/) und teilt keinen Code damit. Die Komponenten der Oberfläche basieren auf [rust-ui](https://github.com/rust-ui/ui) (MIT), die Schrift ist [Inter](https://rsms.me/inter/) (OFL).
+AGPL-3.0-or-later. nrzNetwork ist ein eigenständiges Projekt nach dem Vorbild von [Technitium DNS Server](https://technitium.com/dns/) und teilt keinen Code damit. Die Komponenten der Oberfläche basieren auf [rust-ui](https://github.com/rust-ui/ui) (MIT), die Schrift ist [Inter](https://rsms.me/inter/) (OFL).

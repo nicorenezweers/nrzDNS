@@ -25,7 +25,7 @@ fn AuthCard(
                     }
                 }
                 div { class: "rounded-xl border bg-card p-6 shadow-sm", {children} }
-                p { class: "mt-6 text-center text-xs text-muted-foreground", {tr("nrzDNS – dein eigener DNS-Server")} }
+                p { class: "mt-6 text-center text-xs text-muted-foreground", {tr("nrzNetwork – dein eigener DNS-Server")} }
                 div { class: "mt-3 flex justify-center", crate::components::language::LanguageSelect {} }
             }
         }
@@ -104,7 +104,7 @@ pub fn Login(next: String) -> Element {
         });
     };
     rsx! {
-        AuthCard { title: tr("Anmelden"), subtitle: tr("Willkommen zurück bei nrzDNS"),
+        AuthCard { title: tr("Anmelden"), subtitle: tr("Willkommen zurück bei nrzNetwork"),
             form { class: "grid grid-cols-1 gap-4", onsubmit: submit,
                 if let Some(e) = error() {
                     Callout { text: e, error: true }
@@ -221,7 +221,7 @@ pub fn Setup() -> Element {
         });
     }
     rsx! {
-        AuthCard { title: tr("nrzDNS einrichten"), subtitle: tr("Lege das erste Konto an."),
+        AuthCard { title: tr("nrzNetwork einrichten"), subtitle: tr("Lege das erste Konto an."),
             RegisterForm { first: true }
         }
     }
@@ -236,7 +236,7 @@ pub fn Register() -> Element {
         .and_then(|r| r.as_ref().ok())
         .map(|s| s.registration_open || s.setup_required);
     rsx! {
-        AuthCard { title: tr("Registrieren"), subtitle: tr("Neues Konto bei nrzDNS"),
+        AuthCard { title: tr("Registrieren"), subtitle: tr("Neues Konto bei nrzNetwork"),
             match open {
                 None => rsx! { Loading {} },
                 Some(true) => rsx! { RegisterForm { first: false } },

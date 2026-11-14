@@ -22,6 +22,8 @@ async fn build_status(
     config: &Config,
     state: &ProxyState,
 ) -> AppResult<ProxyStatus> {
+    let settings = proxy::settings(pool).await?;
+    let device = proxy::device_addresses(&settings, &config.data_dir);
     Ok(ProxyStatus {
         listen: config
             .proxy_listen
@@ -30,8 +32,10 @@ async fn build_status(
             .collect(),
         port: config.proxy_listen.first().map_or(0, |a| a.port()),
         listen_errors: state.listen_errors(),
-        settings: proxy::settings(pool).await?,
-        hosts: proxy::list(pool).await?,
+        hosts: proxy::list(pool, &device).await?,
+        settings,
+        device_addresses: device.iter().map(ToString::to_string).collect(),
+        gateway: proxy::gateway_status(&config.data_dir),
     })
 }
 
@@ -54,7 +58,8 @@ async fn save_settings(
     engine: &State<Engine>,
     state: &State<ProxyState>,
 ) -> AppResult<Json<ProxyStatus>> {
-    proxy::save_settings(pool, &body).await?;
+    let saved = proxy::save_settings(pool, &body).await?;
+    proxy::write_port80_flag(&config.data_dir, &saved);
     sync::push_proxy(pool, engine, state).await?;
     Ok(Json(build_status(pool, config, state).await?))
 }

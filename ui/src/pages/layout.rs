@@ -116,7 +116,7 @@ fn Sidebar() -> Element {
         div { class: "flex h-14 shrink-0 items-center gap-2.5 px-4",
             Link { to: Route::Dashboard { range: None }, class: "flex items-center gap-2.5",
                 img { src: asset!("/assets/icon.png"), class: "size-7 rounded-lg", alt: "" }
-                span { class: "text-[15px] font-semibold tracking-tight", "nrzDNS" }
+                span { class: "text-[15px] font-semibold tracking-tight", "nrzNetwork" }
             }
         }
 
@@ -129,6 +129,8 @@ fn Sidebar() -> Element {
             NavItem { to: Route::Proxy {}, label: tr("Reverse Proxy"), active: matches!(route, Route::Proxy {}), icon: rsx! { icons::Waypoints {} } }
             NavItem { to: Route::Cache {}, label: tr("Cache"), active: matches!(route, Route::Cache {}), icon: rsx! { icons::Database {} } }
             NavItem { to: Route::Resolve { name: None, qtype: None }, label: tr("DNS-Client"), active: matches!(route, Route::Resolve { .. }), icon: rsx! { icons::Terminal {} } }
+            NavItem { to: Route::Devices {}, label: tr("Geräte"), active: matches!(route, Route::Devices {}), icon: rsx! { icons::MonitorSmartphone {} } }
+            NavItem { to: Route::Tools {}, label: tr("Netzwerk-Tools"), active: matches!(route, Route::Tools {}), icon: rsx! { icons::Wrench {} } }
             div { class: "my-2 h-px bg-sidenav-border" }
             NavItem { to: Route::Settings { section: "general".into() }, label: tr("Einstellungen"), active: matches!(route, Route::Settings { .. }), icon: rsx! { icons::Settings {} } }
         }

@@ -33,7 +33,7 @@ pub fn Zones() -> Element {
     rsx! {
         PageHeader {
             title: tr("Zonen"),
-            description: tr("Eigene Zonen beantwortet nrzDNS selbst und verbindlich. Weiterleitungszonen schicken Anfragen an bestimmte Server – z. B. fritz.box an den Router."),
+            description: tr("Eigene Zonen beantwortet nrzNetwork selbst und verbindlich. Weiterleitungszonen schicken Anfragen an bestimmte Server – z. B. fritz.box an den Router."),
             actions: rsx! {
                 if admin {
                     button { class: btn(BTN_OUTLINE), onclick: move |_| import_open.set(true),
@@ -266,7 +266,7 @@ fn CreateZone(open: Signal<bool>, on_done: EventHandler<Zone>) -> Element {
                     }
                     p { class: "text-xs text-muted-foreground",
                         if kind() == ZoneKind::Primary {
-                            {tr("nrzDNS legt SOA und NS an; Einträge pflegst du danach in der Zone.")}
+                            {tr("nrzNetwork legt SOA und NS an; Einträge pflegst du danach in der Zone.")}
                         } else {
                             {tr("Anfragen in dieser Zone gehen an die Server unten. Eigene Einträge in der Zone haben trotzdem Vorrang.")}
                         }

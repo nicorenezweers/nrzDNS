@@ -2,7 +2,7 @@
 //! dem Präfix `NRZDNS_` (z. B. `NRZDNS_DATA_DIR`, `NRZDNS_DNS_LISTEN`).
 //!
 //! Rockets eigene Schlüssel (`port`, `address`, `ip_header`, `limits` …) gelten wie gewohnt;
-//! hier stehen nur die von nrzDNS. Alles, was sich zur Laufzeit ändern lässt (Weiterleitungen,
+//! hier stehen nur die von nrzNetwork. Alles, was sich zur Laufzeit ändern lässt (Weiterleitungen,
 //! Cache, Sperren …), liegt dagegen als [`nrzdns_types::DnsSettings`] in der Datenbank.
 
 use rocket::figment::providers::{Env, Format, Toml};
@@ -26,10 +26,17 @@ pub struct Config {
     /// Port gilt 80. Leer = kein Proxy.
     #[serde(deserialize_with = "proxy_addrs")]
     pub proxy_listen: Vec<SocketAddr>,
+    /// Name, unter dem der Container das Gerät selbst erreicht (`NRZDNS_HOST_GATEWAY`, auf
+    /// Umbrel `host.docker.internal`). Ziele auf einer Adresse dieses Geräts verbindet der
+    /// Proxy darüber – aus dem Container ist z. B. die VPN-Adresse oft nicht erreichbar.
+    pub host_gateway: Option<String>,
+    /// Ziel für Namen ohne Eintrag, IP-Adressen und `.local`-Namen (`NRZDNS_PROXY_FALLBACK`,
+    /// auf Umbrel `http://host.docker.internal:80` = umbrelOS), wenn der Proxy Port 80 hat.
+    pub proxy_fallback: Option<String>,
     /// Neue Benutzer dürfen sich selbst registrieren, solange der Admin nichts anderes
     /// einstellt (das erste Konto immer).
     pub registration_open: bool,
-    /// Cookies nur über HTTPS senden – einschalten, sobald nrzDNS hinter HTTPS läuft.
+    /// Cookies nur über HTTPS senden – einschalten, sobald nrzNetwork hinter HTTPS läuft.
     pub cookie_secure: bool,
     /// Hintergrundarbeiten (DNS-Ports öffnen, Sperrlisten laden, Aufräumen) starten.
     /// Tests schalten sie aus.
@@ -45,6 +52,8 @@ impl Default for Config {
             data_dir: PathBuf::from("./data"),
             dns_listen: vec![SocketAddr::from(([0, 0, 0, 0], 53))],
             proxy_listen: vec![SocketAddr::from(([0, 0, 0, 0], 80))],
+            host_gateway: None,
+            proxy_fallback: None,
             registration_open: false,
             cookie_secure: false,
             background: true,

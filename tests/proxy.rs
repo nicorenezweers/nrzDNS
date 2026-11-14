@@ -65,7 +65,7 @@ async fn hosts_api_and_dns_answers() {
     .await;
     assert_eq!(s, Status::Created, "{v}");
 
-    // nrzDNS beantwortet die Namen selbst
+    // nrzNetwork beantwortet die Namen selbst
     let v = resolve(&client, "music.nrz.ch", "A").await;
     assert_eq!(v["rcode"], "NOERROR", "{v}");
     assert_eq!(v["answers"][0]["data"], "100.78.107.162", "{v}");
@@ -215,4 +215,127 @@ async fn forwards_by_host_header() {
 
     let out = http(proxy_port, "bench.nrz.ch", "/").await;
     assert!(out.starts_with("HTTP/1.1 404"), "{out}");
+}
+
+async fn http_raw(port: u16, request: String) -> String {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    s.write_all(request.as_bytes()).await.unwrap();
+    let mut out = String::new();
+    tokio::time::timeout(Duration::from_secs(5), s.read_to_string(&mut out))
+        .await
+        .unwrap()
+        .unwrap();
+    out
+}
+
+async fn start_proxy(client: &rocket::local::asynchronous::Client) -> u16 {
+    let port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    let state = client.rocket().state::<ProxyState>().unwrap().clone();
+    state
+        .serve(
+            &[format!("127.0.0.1:{port}").parse().unwrap()],
+            client.rocket().shutdown(),
+        )
+        .await;
+    port
+}
+
+#[rocket::async_test]
+async fn block_page_unlock_and_request() {
+    let (client, _dir) = common::client().await;
+    login_as(&client, "admin", true).await;
+    let (_, mut dns) = get(&client, "/api/v1/settings/dns").await;
+    dns["blockMode"] = json!("blockPage");
+    dns["forwarders"] = json!([]);
+    let (s, v) = put(&client, "/api/v1/settings/dns", dns).await;
+    assert_eq!(s, Status::Ok, "{v}");
+    let (s, v) = put(
+        &client,
+        "/api/v1/proxy/settings",
+        json!({ "address": "192.168.0.198, 100.78.107.162", "allowUnlock": true, "unlockMinutes": [15, 60], "allowRequests": true }),
+    )
+    .await;
+    assert_eq!(s, Status::Ok, "{v}");
+    assert_eq!(
+        v["deviceAddresses"],
+        json!(["192.168.0.198", "100.78.107.162"])
+    );
+    for d in ["ads.example.com", "tracker.example.net"] {
+        let (s, v) = post(&client, "/api/v1/blocked", json!({ "domain": d })).await;
+        assert_eq!(s, Status::Created, "{v}");
+    }
+
+    // DNS: gesperrte Namen zeigen auf dieses Gerät
+    let v = resolve(&client, "x.ads.example.com", "A").await;
+    assert_eq!(v["kind"], "blocked", "{v}");
+    assert_eq!(v["answers"][0]["data"], "192.168.0.198", "{v}");
+
+    let port = start_proxy(&client).await;
+    let out = http(port, "x.ads.example.com", "/").await;
+    assert!(out.starts_with("HTTP/1.1 403"), "{out}");
+    assert!(out.contains("durch nrzNetwork gesperrt"), "{out}");
+    assert!(
+        out.contains("15 Minuten") && out.contains("1 Stunde"),
+        "{out}"
+    );
+
+    let out = http(port, "irgendwas", "/.nrznetwork/health").await;
+    assert!(out.ends_with("nrznetwork-ok"), "{out}");
+
+    // Fremde Seite darf nicht freischalten
+    let body = "minutes=15&back=%2Fseite";
+    let foreign = http_raw(port, format!(
+        "POST /.nrznetwork/unlock HTTP/1.1\r\nHost: x.ads.example.com\r\nOrigin: http://evil.example\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()
+    )).await;
+    assert!(foreign.starts_with("HTTP/1.1 403"), "{foreign}");
+    // Nicht angebotener Zeitraum
+    let body5 = "minutes=5";
+    let bad = http_raw(port, format!(
+        "POST /.nrznetwork/unlock HTTP/1.1\r\nHost: x.ads.example.com\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body5}", body5.len()
+    )).await;
+    assert!(bad.starts_with("HTTP/1.1 400"), "{bad}");
+
+    let ok = http_raw(port, format!(
+        "POST /.nrznetwork/unlock HTTP/1.1\r\nHost: x.ads.example.com\r\nOrigin: http://x.ads.example.com\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()
+    )).await;
+    assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
+    assert!(
+        ok.contains("Freigeschaltet") && ok.contains("http://x.ads.example.com/seite"),
+        "{ok}"
+    );
+    let (_, v) = get(&client, "/api/v1/unlocks").await;
+    assert_eq!(v[0]["domain"], "x.ads.example.com", "{v}");
+    assert_eq!(v[0]["client"], "127.0.0.1", "{v}");
+    let (_, v) = get(&client, "/api/v1/blocking/check?domain=x.ads.example.com").await;
+    assert_eq!(v["allowed"], true, "{v}");
+    let (s, _) = delete(&client, "/api/v1/unlocks/x.ads.example.com").await;
+    assert_eq!(s, Status::NoContent);
+    let (_, v) = get(&client, "/api/v1/blocking/check?domain=x.ads.example.com").await;
+    assert_eq!(v["allowed"], false, "{v}");
+
+    // Antrag → Admin genehmigt → Ausnahme
+    let body = "reason=Brauche+ich+f%C3%BCr+die+Arbeit";
+    let out = http_raw(port, format!(
+        "POST /.nrznetwork/request HTTP/1.1\r\nHost: tracker.example.net\r\nAccept-Language: en-US\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()
+    )).await;
+    assert!(
+        out.starts_with("HTTP/1.1 200") && out.contains("Request sent"),
+        "{out}"
+    );
+    let out = http(port, "tracker.example.net", "/").await;
+    assert!(out.contains("wartet schon eine Anfrage"), "{out}");
+    let (_, v) = get(&client, "/api/v1/requests").await;
+    assert_eq!(v[0]["status"], "pending", "{v}");
+    assert_eq!(v[0]["reason"], "Brauche ich für die Arbeit", "{v}");
+    let id = v[0]["id"].as_i64().unwrap();
+    let (s, v) = post(&client, format!("/api/v1/requests/{id}/approve"), json!({})).await;
+    assert_eq!(s, Status::Ok, "{v}");
+    assert_eq!(v["status"], "approved");
+    let (s, _) = post(&client, format!("/api/v1/requests/{id}/reject"), json!({})).await;
+    assert_eq!(s, Status::Conflict);
+    let (_, v) = get(&client, "/api/v1/allowed").await;
+    assert_eq!(v[0]["domain"], "tracker.example.net", "{v}");
 }

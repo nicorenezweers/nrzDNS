@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <!-- nrzDNS: a card with a globe in front of a signpost - names point the way to addresses.
+  <!-- nrzNetwork: a card with a globe in front of a signpost - names point the way to addresses.
        Square, no rounded corners: platforms like Umbrel round the icon themselves. -->
   <rect width="256" height="256" fill="#18181b"/>
   <!-- signpost behind: pole and two signs pointing right -->

@@ -1,4 +1,4 @@
-//! nrzDNS – Oberfläche (Dioxus 0.7, WebAssembly) mit Komponenten von rust-ui.
+//! nrzNetwork – Oberfläche (Dioxus 0.7, WebAssembly) mit Komponenten von rust-ui.
 //! Spricht nur mit der JSON-API unter `/api/v1` (Sitzungs-Cookie); die Typen kommen aus
 //! `nrzdns-types`, damit Server und Oberfläche nie auseinanderlaufen.
 
@@ -18,12 +18,14 @@ use pages::auth::{Login, Register, Setup};
 use pages::blocking::Blocking;
 use pages::cache::Cache;
 use pages::dashboard::Dashboard;
+use pages::devices::Devices;
 use pages::layout::AppLayout;
 use pages::logs::Logs;
 use pages::not_found::NotFound;
 use pages::proxy::Proxy;
 use pages::resolve::Resolve;
 use pages::settings::Settings;
+use pages::tools::Tools;
 use pages::zone::ZoneView;
 use pages::zones::Zones;
 
@@ -67,6 +69,10 @@ pub enum Route {
         Cache {},
         #[route("/proxy")]
         Proxy {},
+        #[route("/devices")]
+        Devices {},
+        #[route("/tools")]
+        Tools {},
         #[route("/resolve?:name&:qtype")]
         Resolve { name: Option<String>, qtype: Option<String> },
         #[redirect("/settings", || Route::Settings { section: "general".into() })]

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-# nrzDNS – Multi-Stage-Build für amd64 und arm64: Oberfläche (Dioxus/WebAssembly), DNS-Engine
+# nrzNetwork – Multi-Stage-Build für amd64 und arm64: Oberfläche (Dioxus/WebAssembly), DNS-Engine
 # und Server (Rust) in einer Datei. Braucht nur Docker – kein Rust auf dem Rechner.
 #   docker build -t nrzdns .
 #   docker run -p 53:53/udp -p 53:53/tcp -p 8380:8380 -p 80:80 -v nrzdns-data:/data nrzdns

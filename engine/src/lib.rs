@@ -25,6 +25,7 @@ pub mod zonefile;
 
 mod blocking;
 mod cache;
+mod local;
 mod pipeline;
 mod server;
 mod stats;
@@ -41,6 +42,7 @@ use nrzdns_types::{
     ServerStatus, ZoneDetail,
 };
 use stats::{lock, HealthMap, Listeners, QueryStats, RateLimiter};
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -80,6 +82,7 @@ struct Inner {
     settings: RwLock<Arc<DnsSettings>>,
     log: mpsc::Sender<QueryLogEntry>,
     zones: RwLock<Arc<ZoneSet>>,
+    local: RwLock<Arc<local::LocalHosts>>,
     blocking: RwLock<BlockData>,
     /// Hält Änderungen an den Sperrdaten nacheinander (die Zählung läuft ausserhalb der Sperre).
     blocking_update: Mutex<()>,
@@ -128,6 +131,7 @@ impl Engine {
                 settings: RwLock::new(Arc::new(settings)),
                 log: tx,
                 zones: RwLock::new(Arc::new(ZoneSet::default())),
+                local: RwLock::new(Arc::new(local::LocalHosts::default())),
                 blocking: RwLock::new(BlockData::default()),
                 blocking_update: Mutex::new(()),
                 cache: Cache::default(),
@@ -175,6 +179,22 @@ impl Engine {
     pub fn set_zones(&self, zones: Vec<ZoneDetail>) {
         let set = ZoneSet::build(&zones, &self.settings_arc().server_domain);
         *write(&self.inner.zones) = Arc::new(set);
+    }
+
+    /// Namen, die die Engine selbst mit einer Adresse dieses Geräts beantwortet (Reverse
+    /// Proxy), und die Adressen des Geräts (auch für die Sperrseite). Je Name eigene Adressen
+    /// oder leer = die des Geräts; gewählt wird je Client die passendste (LAN, VPN …).
+    pub fn set_local_hosts(&self, names: HashMap<String, Vec<IpAddr>>, device: Vec<IpAddr>) {
+        *write(&self.inner.local) = Arc::new(local::LocalHosts { names, device });
+    }
+
+    /// Adressen dieses Geräts (siehe [`Self::set_local_hosts`]).
+    pub fn device_addresses(&self) -> Vec<IpAddr> {
+        read(&self.inner.local).device.clone()
+    }
+
+    pub(crate) fn local_hosts(&self) -> Arc<local::LocalHosts> {
+        read(&self.inner.local).clone()
     }
 
     /// Domains einer Sperrliste setzen oder ersetzen (schon normalisiert, siehe

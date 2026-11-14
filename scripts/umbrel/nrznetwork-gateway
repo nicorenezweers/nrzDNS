@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# nrzNetwork-Waechter fuer umbrelOS (laeuft auf dem Geraet, gestartet von hooks/pre-start).
+#
+# * Schreibt die Adressen des Geraets (LAN, NetBird/Tailscale ...) nach data/host-addresses,
+#   damit nrzNetwork jedem Client die passende Adresse nennt.
+# * Gibt Port 80 des Geraets an den Reverse Proxy von nrzNetwork (Container-Port 81), solange
+#   der Proxy auf /.nrznetwork/health antwortet: eigene iptables-Kette NRZNETWORK in
+#   nat/PREROUTING, DNAT tcp/80 -> <Container-IP>:81, nicht fuer lo, docker0, br-*, veth*
+#   (Container erreichen umbrelOS also weiter direkt). Alles ohne Eintrag reicht der Proxy an
+#   umbrelOS weiter (NRZDNS_PROXY_FALLBACK).
+# * Antwortet der Proxy zweimal nicht, steht in data/port80 "off", ist der Container weg oder
+#   endet der Waechter, wird die Kette sofort entfernt - Port 80 gehoert dann wieder umbrelOS.
+#
+# Aufruf: nrznetwork-gateway <APP_DATA_DIR>
+set -u
+
+APP_DIR="${1:?APP_DATA_DIR fehlt}"
+DATA="${APP_DIR}/data"
+CONTAINER="${NRZ_CONTAINER:-nrz-dns_app_1}"
+CHAIN="NRZNETWORK"
+PORT=81
+LOG="${DATA}/gateway.log"
+STATE="${DATA}/gateway.json"
+PIDFILE="${DATA}/gateway.pid"
+INTERVAL="${NRZ_INTERVAL:-5}"
+
+mkdir -p "${DATA}"
+echo $$ > "${PIDFILE}"
+
+log() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "${LOG}"
+  if [ "$(wc -c < "${LOG}" 2>/dev/null || echo 0)" -gt 200000 ]; then
+    tail -n 400 "${LOG}" > "${LOG}.tmp" && mv -f "${LOG}.tmp" "${LOG}"
+  fi
+}
+
+state() {
+  printf '{"active":%s,"message":"%s","updatedAt":%s}\n' "$1" "$2" "$(date +%s)" > "${STATE}.tmp" \
+    && mv -f "${STATE}.tmp" "${STATE}"
+  chown 1000:1000 "${STATE}" 2>/dev/null || true
+}
+
+if ! command -v iptables >/dev/null 2>&1; then
+  log "iptables fehlt - Port 80 bleibt bei umbrelOS"
+  state false "iptables fehlt auf dem Geraet"
+  exit 1
+fi
+
+remove_rules() {
+  while iptables -w -t nat -D PREROUTING -j "${CHAIN}" 2>/dev/null; do :; done
+  iptables -w -t nat -F "${CHAIN}" 2>/dev/null || true
+  iptables -w -t nat -X "${CHAIN}" 2>/dev/null || true
+}
+
+install_rules() {
+  local ip="$1"
+  iptables -w -t nat -N "${CHAIN}" 2>/dev/null || iptables -w -t nat -F "${CHAIN}" || return 1
+  local i
+  for i in lo docker0 'br-+' 'veth+'; do
+    iptables -w -t nat -A "${CHAIN}" -i "${i}" -j RETURN || return 1
+  done
+  iptables -w -t nat -A "${CHAIN}" -p tcp --dport 80 -m addrtype --dst-type LOCAL \
+    -j DNAT --to-destination "${ip}:${PORT}" || return 1
+  iptables -w -t nat -C PREROUTING -j "${CHAIN}" 2>/dev/null \
+    || iptables -w -t nat -I PREROUTING 1 -j "${CHAIN}" || return 1
+}
+
+container_ip() {
+  docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "${CONTAINER}" 2>/dev/null \
+    | awk '{print $1}'
+}
+
+healthy() {
+  local ip="$1"
+  timeout 3 bash -c "exec 3<>/dev/tcp/${ip}/${PORT} \
+    && printf 'GET /.nrznetwork/health HTTP/1.0\r\nHost: nrznetwork\r\n\r\n' >&3 \
+    && grep -q nrznetwork-ok <&3" 2>/dev/null
+}
+
+host_addresses() {
+  ip -o -4 addr show scope global 2>/dev/null \
+    | awk '$2 !~ /^(docker|br-|veth|lo)/ { split($4, a, "/"); print a[1] }' \
+    | sort -u
+}
+
+cleanup() {
+  remove_rules
+  state false "Waechter beendet"
+  log "Waechter beendet - Port 80 gehoert wieder umbrelOS"
+  rm -f "${PIDFILE}"
+  exit 0
+}
+trap cleanup TERM INT HUP
+
+log "Waechter gestartet (PID $$)"
+remove_rules
+active=""
+fails=0
+missing=0
+last_addrs=""
+
+while :; do
+  addrs="$(host_addresses)"
+  if [ "${addrs}" != "${last_addrs}" ]; then
+    printf '%s\n' ${addrs} > "${DATA}/host-addresses.tmp" && mv -f "${DATA}/host-addresses.tmp" "${DATA}/host-addresses"
+    chown 1000:1000 "${DATA}/host-addresses" 2>/dev/null || true
+    log "Adressen des Geraets: $(echo ${addrs})"
+    last_addrs="${addrs}"
+  fi
+
+  flag="$({ tr -d '[:space:]' < "${DATA}/port80"; } 2>/dev/null || echo on)"
+  cip="$(container_ip)"
+
+  if [ -z "${cip}" ]; then
+    missing=$((missing + 1))
+    if [ -n "${active}" ]; then
+      remove_rules; active=""
+      log "Container ohne Adresse - Port 80 zurueck an umbrelOS"
+    fi
+    state false "nrzNetwork laeuft nicht"
+    if [ "${missing}" -ge 60 ]; then
+      log "Container seit 5 Minuten weg - Waechter endet"
+      cleanup
+    fi
+  elif [ "${flag}" = "off" ]; then
+    missing=0
+    if [ -n "${active}" ]; then
+      remove_rules; active=""
+      log "Port 80 ausgeschaltet"
+    fi
+    state false "Ausgeschaltet - Port 80 gehoert umbrelOS"
+  elif healthy "${cip}"; then
+    missing=0; fails=0
+    if [ -n "${active}" ] && ! iptables -w -t nat -C PREROUTING -j "${CHAIN}" 2>/dev/null; then
+      active=""
+    fi
+    if [ "${active}" != "${cip}" ]; then
+      if install_rules "${cip}"; then
+        active="${cip}"
+        log "Port 80 -> ${cip}:${PORT}"
+      else
+        remove_rules; active=""
+        log "Regeln setzen fehlgeschlagen - Port 80 bleibt bei umbrelOS"
+      fi
+    fi
+    if [ -n "${active}" ]; then
+      state true "Port 80 zeigt auf den Proxy (${cip}:${PORT})"
+    else
+      state false "Regeln liessen sich nicht setzen"
+    fi
+  else
+    missing=0
+    fails=$((fails + 1))
+    if [ -n "${active}" ] && [ "${fails}" -ge 2 ]; then
+      remove_rules; active=""
+      log "Proxy antwortet nicht - Port 80 zurueck an umbrelOS"
+    fi
+    [ -z "${active}" ] && state false "Proxy antwortet (noch) nicht - Port 80 gehoert umbrelOS"
+  fi
+
+  sleep "${INTERVAL}" &
+  wait $!
+done

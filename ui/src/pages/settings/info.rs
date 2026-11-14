@@ -7,7 +7,7 @@ use crate::util;
 use dioxus::prelude::*;
 use nrzdns_types::ServerStatus;
 
-const REPO: &str = "https://github.com/nicorenezweers/nrzDNS";
+const REPO: &str = "https://github.com/nicorenezweers/nrzNetwork";
 
 #[component]
 pub fn Info() -> Element {
@@ -26,7 +26,7 @@ pub fn Info() -> Element {
                 }
             );
             rsx! {
-                Section { title: "nrzDNS", description: tr("Eigener DNS-Server mit Zonen, Sperrlisten, Cache und DNS über HTTPS – in Rust."),
+                Section { title: "nrzNetwork", description: tr("Eigener DNS-Server mit Zonen, Sperrlisten, Cache und DNS über HTTPS – in Rust."),
                     dl { class: "grid max-w-2xl grid-cols-[6.5rem_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm sm:grid-cols-[10rem_minmax(0,1fr)]",
                         dt { class: "text-muted-foreground", {tr("Version")} }
                         dd { class: "font-medium", "{s.version}" }
@@ -35,7 +35,7 @@ pub fn Info() -> Element {
                         dt { class: "text-muted-foreground", {tr("Quelltext")} }
                         dd {
                             a { class: "inline-flex max-w-full items-center gap-1.5 underline-offset-4 hover:underline", href: REPO, target: "_blank", rel: "noopener noreferrer",
-                                span { class: "truncate", "github.com/nicorenezweers/nrzDNS" }
+                                span { class: "truncate", "github.com/nicorenezweers/nrzNetwork" }
                                 icons::ExternalLink { class: "size-3.5 text-muted-foreground" }
                             }
                         }

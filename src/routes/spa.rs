@@ -93,9 +93,9 @@ impl<'r> Responder<'r, 'static> for Reply {
             Reply::Missing => {
                 let body = "<!doctype html><html lang=de><meta charset=utf-8>\
                     <meta name=viewport content=\"width=device-width,initial-scale=1\">\
-                    <title>nrzDNS</title>\
+                    <title>nrzNetwork</title>\
                     <body style=\"background:#171717;color:#e5e5e5;font-family:sans-serif;display:grid;place-items:center;min-height:90vh\">\
-                    <main style=\"max-width:36rem;padding:1rem\"><h1>nrzDNS</h1>\
+                    <main style=\"max-width:36rem;padding:1rem\"><h1>nrzNetwork</h1>\
                     <p>Die Oberfläche ist nicht eingebaut – vor dem Übersetzen \
                     <code>scripts/ui.sh</code> ausführen (baut <code>ui/</code> nach \
                     <code>ui/dist/public</code>) und den Server neu übersetzen.</p>\

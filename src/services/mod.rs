@@ -8,5 +8,7 @@ pub mod proxy;
 pub mod querylog;
 pub mod settings;
 pub mod sync;
+pub mod tools;
+pub mod unlocks;
 pub mod users;
 pub mod zones;

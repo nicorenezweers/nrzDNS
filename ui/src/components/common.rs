@@ -70,7 +70,7 @@ pub fn PageHeader(
     #[props(optional)] eyebrow: Option<String>,
 ) -> Element {
     rsx! {
-        document::Title { "{title} · nrzDNS" }
+        document::Title { "{title} · nrzNetwork" }
         div { class: "mb-6 flex flex-wrap items-end justify-between gap-4",
             div { class: "flex min-w-0 items-center gap-2",
                 MenuButton {}

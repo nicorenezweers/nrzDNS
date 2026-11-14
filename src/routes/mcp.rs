@@ -28,7 +28,8 @@ const VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 /// Grösster Anfragekörper.
 const MAX_BODY_KIB: u64 = 256;
 
-const INSTRUCTIONS: &str = "nrzDNS ist ein DNS-Server mit Sperrlisten (Werbe-/Tracking-Filter). \
+const INSTRUCTIONS: &str =
+    "nrzNetwork ist ein DNS-Server mit Sperrlisten (Werbe-/Tracking-Filter). \
     Für eine Übersicht get_overview aufrufen (alle Kennzahlen in einem Aufruf); Details mit \
     get_statistics, get_server_status, get_blocking_status und get_query_log. Filter schalten \
     set_blocking (dauerhaft) und pause_blocking (auf Zeit), sofern Änderungen erlaubt sind.";
@@ -91,7 +92,7 @@ impl<'r> Responder<'r, 'static> for Reply {
         if self.challenge {
             r.header(Header::new(
                 "WWW-Authenticate",
-                "Bearer realm=\"nrzDNS MCP\"",
+                "Bearer realm=\"nrzNetwork MCP\"",
             ));
         }
         if self.status == Status::MethodNotAllowed {
@@ -137,7 +138,7 @@ async fn post_mcp(
         Ok(Access::Disabled) => {
             return Reply::error(
                 Status::Unauthorized,
-                "MCP ist aus – in nrzDNS unter Einstellungen → MCP ein Token erzeugen.",
+                "MCP ist aus – in nrzNetwork unter Einstellungen → MCP ein Token erzeugen.",
             )
         }
         Ok(Access::Denied) => {
@@ -236,7 +237,7 @@ async fn handle(ctx: &Ctx<'_>, m: &Value) -> Option<Value> {
                     "capabilities": { "tools": { "listChanged": false } },
                     "serverInfo": {
                         "name": "nrzDNS",
-                        "title": "nrzDNS",
+                        "title": "nrzNetwork",
                         "version": crate::VERSION
                     },
                     "instructions": INSTRUCTIONS

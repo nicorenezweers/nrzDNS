@@ -1,5 +1,5 @@
 //! Reverse Proxy: Namen wie `music.nrz.ch` an ein HTTP-Ziel wie `http://100.78.107.162:8350`
-//! weiterreichen. nrzDNS beantwortet den Namen selbst mit der Adresse des Proxys.
+//! weiterreichen. nrzNetwork beantwortet den Namen selbst mit der Adresse des Proxys.
 
 use crate::api;
 use crate::components::common::*;
@@ -9,7 +9,7 @@ use crate::state;
 use crate::ui::alert::{Alert, AlertDescription, AlertTitle};
 use crate::ui::table::*;
 use dioxus::prelude::*;
-use nrzdns_types::{ProxyHost, ProxyHostInput, ProxySettings, ProxyStatus};
+use nrzdns_types::{GatewayStatus, ProxyHost, ProxyHostInput, ProxySettings, ProxyStatus};
 
 /// Adresse, unter der Browser den Namen öffnen.
 fn url(host: &str, port: u16) -> String {
@@ -36,7 +36,7 @@ pub fn Proxy() -> Element {
                 icons::Waypoints {}
                 AlertTitle { {tr("So funktioniert es")} }
                 AlertDescription {
-                    p { {tr("Trage einen Namen und das Ziel ein. nrzDNS beantwortet den Namen mit der Adresse dieses Geräts, und der Proxy reicht jede HTTP-Anfrage für diesen Namen an das Ziel weiter – Ports spielen für den Browser keine Rolle mehr. Die Domain muss dir nicht gehören: Es klappt auf allen Geräten, die nrzDNS als DNS-Server benutzen. Nur HTTP, kein HTTPS.")} }
+                    p { {tr("Trage einen Namen und das Ziel ein. nrzNetwork beantwortet den Namen mit der Adresse dieses Geräts, und der Proxy reicht jede HTTP-Anfrage für diesen Namen an das Ziel weiter – Ports spielen für den Browser keine Rolle mehr. Die Domain muss dir nicht gehören: Es klappt auf allen Geräten, die nrzNetwork als DNS-Server benutzen. Nur HTTP, kein HTTPS.")} }
                 }
             }
             if !admin {
@@ -52,11 +52,11 @@ pub fn Proxy() -> Element {
                     for e in s.listen_errors.iter() {
                         Callout { key: "{e}", text: trf("Port konnte nicht geöffnet werden: {0}", &[e]), error: true }
                     }
-                    if s.port != 80 && s.port != 0 {
+                    if s.port != 80 && s.port != 0 && !s.gateway.as_ref().is_some_and(|g| g.active) {
                         Callout { text: trf("Der Proxy läuft auf Port {0} – Namen also mit Port öffnen, z. B. http://music.nrz.ch:{0}/.", &[&s.port.to_string()]) }
                     }
                     Hosts { status: s.clone(), version }
-                    AddressSection { settings: s.settings.clone(), version }
+                    AddressSection { settings: s.settings.clone(), device: s.device_addresses.clone(), gateway: s.gateway.clone(), version }
                 },
             }
         }
@@ -235,7 +235,7 @@ fn HostRow(
                             move |_| {
                                 let h = h.clone();
                                 spawn(async move {
-                                    let ask = Ask::new(trf("„{0}“ entfernen?", &[&h.host]), tr("Der Name wird dann nicht mehr weitergereicht und von nrzDNS nicht mehr beantwortet."))
+                                    let ask = Ask::new(trf("„{0}“ entfernen?", &[&h.host]), tr("Der Name wird dann nicht mehr weitergereicht und von nrzNetwork nicht mehr beantwortet."))
                                         .confirm(tr("Entfernen"))
                                         .destructive();
                                     if confirm(ask).await {
@@ -328,18 +328,42 @@ fn EditDialog(editing: Signal<Option<ProxyHost>>, version: Signal<u64>) -> Eleme
 }
 
 #[component]
-fn AddressSection(settings: ProxySettings, version: Signal<u64>) -> Element {
+fn AddressSection(
+    settings: ProxySettings,
+    device: Vec<String>,
+    gateway: Option<GatewayStatus>,
+    version: Signal<u64>,
+) -> Element {
     let admin = state::is_admin();
     let mut address = use_signal(|| settings.address.clone());
+    let mut allow_unlock = use_signal(|| settings.allow_unlock);
+    let mut minutes = use_signal(|| {
+        settings
+            .unlock_minutes
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    });
+    let mut allow_requests = use_signal(|| settings.allow_requests);
+    let mut port80 = use_signal(|| settings.port80);
     let mut busy = use_signal(|| false);
     let save = move |e: FormEvent| {
         e.prevent_default();
+        let unlock_minutes: Vec<u32> = minutes()
+            .split([',', ' ', ';'])
+            .filter_map(|m| m.trim().parse().ok())
+            .collect();
         spawn(async move {
             busy.set(true);
             let res = api::put::<ProxyStatus, _>(
                 "/proxy/settings",
                 &ProxySettings {
                     address: address().trim().to_string(),
+                    allow_unlock: allow_unlock(),
+                    unlock_minutes,
+                    allow_requests: allow_requests(),
+                    port80: port80(),
                 },
             )
             .await;
@@ -353,21 +377,50 @@ fn AddressSection(settings: ProxySettings, version: Signal<u64>) -> Element {
             }
         });
     };
+    let detected = if device.is_empty() {
+        tr("keine erkannt")
+    } else {
+        device.join(", ")
+    };
     rsx! {
-        Section { title: tr("DNS-Antwort"), description: tr("Mit dieser Adresse beantwortet nrzDNS die Namen der Einträge – die IP-Adresse des Geräts, auf dem nrzDNS läuft."),
-            form { class: "grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end", onsubmit: save,
-                Field { label: tr("IP-Adresse dieses Geräts"), hint: tr("Leer = die IP-Adresse aus dem Ziel (passt, wenn das Ziel auf demselben Gerät läuft)."),
+        Section { title: tr("Gerät und Sperrseite"), description: tr("Mit diesen Adressen beantwortet nrzNetwork die Namen der Einträge und – im Sperrmodus „Sperrseite“ – gesperrte Domains. Jeder Client bekommt die passende (LAN oder VPN)."),
+            form { class: "grid grid-cols-1 gap-5", onsubmit: save,
+                Field { label: tr("IP-Adressen dieses Geräts"), hint: trf("Durch Kommas getrennt. Leer = automatisch erkannt: {0}", &[&detected]),
                     input {
                         class: "{INPUT} font-mono text-[13px]",
                         disabled: !admin,
                         spellcheck: false,
-                        placeholder: "100.78.107.162",
+                        placeholder: "192.168.0.198, 100.78.107.162",
                         value: "{address}",
                         oninput: move |e| address.set(e.value()),
                     }
                 }
+                if let Some(g) = gateway.as_ref() {
+                    div { class: "grid grid-cols-1 gap-2",
+                        Toggle { checked: port80(), disabled: !admin, onchange: move |v| port80.set(v),
+                            label: tr("Port 80 des Umbrel an den Proxy geben (Namen ohne Port)"),
+                            hint: tr("Alles ohne Eintrag – auch die umbrelOS-Oberfläche – reicht der Proxy unverändert an umbrelOS weiter. Antwortet der Proxy nicht, bekommt umbrelOS Port 80 sofort zurück."),
+                        }
+                        Callout { text: if g.active { trf("Aktiv: {0}", &[&g.message]) } else { trf("Nicht aktiv: {0}", &[&g.message]) }, error: !g.active && port80() }
+                    }
+                }
+                Toggle { checked: allow_unlock(), disabled: !admin, onchange: move |v| allow_unlock.set(v),
+                    label: tr("Auf der Sperrseite für eine Weile freischalten lassen"),
+                    hint: tr("Jeder im Netzwerk kann eine gesperrte Seite selbst freischalten; die Freischaltung endet von selbst."),
+                }
+                if allow_unlock() {
+                    Field { label: tr("Zeiträume in Minuten"), hint: tr("Durch Kommas getrennt, 1 bis 1440, z. B. 15, 60, 240."),
+                        input { class: "{INPUT} font-mono text-[13px]", disabled: !admin, value: "{minutes}", oninput: move |e| minutes.set(e.value()) }
+                    }
+                }
+                Toggle { checked: allow_requests(), disabled: !admin, onchange: move |v| allow_requests.set(v),
+                    label: tr("Dauerhafte Freigabe beantragen lassen"),
+                    hint: tr("Anträge erscheinen unter Ausnahmen; ein Admin genehmigt oder lehnt ab."),
+                }
                 if admin {
-                    button { class: btn(BTN_PRIMARY), r#type: "submit", disabled: busy(), {tr("Speichern")} }
+                    div { class: "flex justify-end",
+                        button { class: btn(BTN_PRIMARY), r#type: "submit", disabled: busy(), {tr("Speichern")} }
+                    }
                 }
             }
         }

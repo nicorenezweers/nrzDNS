@@ -1,4 +1,4 @@
-//! nrzDNS – selbst gehosteter DNS-Server (Zonen, Weiterleitung, Cache, Sperrlisten,
+//! nrzNetwork – selbst gehosteter DNS-Server (Zonen, Weiterleitung, Cache, Sperrlisten,
 //! Abfrageprotokoll, DNS über HTTPS). Aufbau: siehe ARCHITECTURE.md.
 //!
 //! Der Server hält alles in SQLite und reicht es an die Engine (`nrzdns-engine`) weiter, die
@@ -50,9 +50,31 @@ pub async fn build_with(figment: Figment) -> Result<Rocket<Build>, error::AppErr
 
     let dns = services::settings::dns(&pool).await?;
     let (engine, log) = Engine::new(dns, VERSION);
-    let proxy = proxy::ProxyState::default();
     services::sync::load_all(&pool, &engine, &config).await?;
-    proxy.set_routes(services::proxy::routes(&pool).await?);
+    let fallback = match config.proxy_fallback.as_deref().map(str::trim) {
+        Some(f) if !f.is_empty() => Some(
+            services::proxy::target(f)
+                .map_err(|_| {
+                    error::AppError::Config(format!("NRZDNS_PROXY_FALLBACK: ungültig „{f}“"))
+                })?
+                .1,
+        ),
+        _ => None,
+    };
+    let proxy = proxy::ProxyState::new(proxy::ProxyContext {
+        pool: pool.clone(),
+        engine: engine.clone(),
+        data_dir: config.data_dir.clone(),
+        host_gateway: config
+            .host_gateway
+            .as_deref()
+            .map(str::trim)
+            .filter(|g| !g.is_empty())
+            .map(str::to_string),
+        fallback,
+    });
+    services::sync::push_proxy(&pool, &engine, &proxy).await?;
+    services::proxy::write_port80_flag(&config.data_dir, &services::proxy::settings(&pool).await?);
 
     Ok(rocket::custom(figment)
         .manage(pool)

@@ -116,7 +116,7 @@ pub fn error_response(
                 .replace('"', "&quot;")
         };
         let html = format!(
-            "<!doctype html><html lang=de><meta charset=utf-8><title>{code} · nrzDNS</title>\
+            "<!doctype html><html lang=de><meta charset=utf-8><title>{code} · nrzNetwork</title>\
              <body style=\"background:#171717;color:#e5e5e5;font-family:sans-serif;display:grid;place-items:center;min-height:90vh\">\
              <main><h1>{code} – {title}</h1><p>{message}</p><p><a style=\"color:#e5e5e5\" href=\"/\">Zur Startseite</a></p></main>",
             code = status.code,

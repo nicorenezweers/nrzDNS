@@ -1,4 +1,4 @@
-//! Statische Dateien, ins Programm eingebettet (siehe build.rs) – nrzDNS bleibt ein
+//! Statische Dateien, ins Programm eingebettet (siehe build.rs) – nrzNetwork bleibt ein
 //! einzelnes Programm und braucht kein CDN:
 //!
 //! * `/static/fonts/…` – die Schrift (Inter), für immer zwischenspeicherbar

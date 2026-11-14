@@ -27,6 +27,8 @@ const FIREFOX_CANARY: &str = "use-application-dns.net";
 const MAX_CNAME_CHAIN: usize = 12;
 /// TTL lokaler Antworten (`localhost` …).
 const LOCAL_TTL: u32 = 3600;
+/// TTL der Antworten für Namen des Reverse Proxys.
+const PROXY_TTL: u32 = 60;
 
 /// Die Frage einer Anfrage.
 #[derive(Clone, Debug)]
@@ -39,6 +41,8 @@ pub(crate) struct QueryCtx {
     pub qclass: DNSClass,
     pub dnssec_ok: bool,
     pub checking_disabled: bool,
+    /// Fragender Client (für Antworten mit Adressen dieses Geräts); `None` beim DNS-Client.
+    pub client: Option<IpAddr>,
 }
 
 /// Ergebnis der Pipeline, bevor es zur Nachricht wird.
@@ -135,7 +139,7 @@ pub(crate) async fn handle(
         .limiter
         .allow(client, settings.rate_limit_qps, started)
     {
-        if let Some(ctx) = req.queries.first().map(|q| ctx_for(q, &req)) {
+        if let Some(ctx) = req.queries.first().map(|q| ctx_for(q, &req, Some(client))) {
             let dropped = Answer::new(ResponseKind::Dropped, ResponseCode::NoError);
             log(
                 engine, &settings, at_ms, started, client, protocol, &ctx, &dropped, true,
@@ -144,7 +148,7 @@ pub(crate) async fn handle(
         return None;
     }
 
-    let (resp, outcome) = process(engine, &req, &settings).await;
+    let (resp, outcome) = process(engine, &req, &settings, Some(client)).await;
     // UDP: so gross, wie der Client per EDNS annimmt (ohne OPT 512), sonst TC-Bit
     let max = match protocol {
         Protocol::Udp => req
@@ -162,7 +166,7 @@ pub(crate) async fn handle(
     Some(bytes)
 }
 
-fn ctx_for(q: &Query, req: &Message) -> QueryCtx {
+fn ctx_for(q: &Query, req: &Message, client: Option<IpAddr>) -> QueryCtx {
     QueryCtx {
         name: q.name.clone(),
         lname: name_str(&q.name),
@@ -170,6 +174,7 @@ fn ctx_for(q: &Query, req: &Message) -> QueryCtx {
         qclass: q.query_class,
         dnssec_ok: req.edns.as_ref().is_some_and(|e| e.flags().dnssec_ok),
         checking_disabled: req.metadata.checking_disabled,
+        client,
     }
 }
 
@@ -178,6 +183,7 @@ async fn process(
     engine: &Engine,
     req: &Message,
     settings: &Arc<DnsSettings>,
+    client: Option<IpAddr>,
 ) -> (Message, Option<(QueryCtx, Answer)>) {
     let mut resp = Message::new(req.metadata.id, MessageType::Response, req.metadata.op_code);
     resp.metadata.recursion_desired = req.metadata.recursion_desired;
@@ -191,7 +197,7 @@ async fn process(
         resp.set_edns(edns);
     }
 
-    let ctx = req.queries.first().map(|q| ctx_for(q, req));
+    let ctx = req.queries.first().map(|q| ctx_for(q, req, client));
     let refuse = |rcode| Answer::new(ResponseKind::Dropped, rcode);
     let answer = match &ctx {
         _ if req.metadata.op_code != OpCode::Query => refuse(ResponseCode::NotImp),
@@ -269,6 +275,9 @@ fn log(
 
 /// Schritte 2–6 für eine Frage.
 pub(crate) async fn resolve_query(engine: &Engine, q: &QueryCtx, s: &Arc<DnsSettings>) -> Answer {
+    if let Some(answer) = local_host_answer(engine, q, s) {
+        return answer;
+    }
     let zones = engine.zones();
     let mut zone_forwarders = None;
     let mut in_zone = false;
@@ -404,6 +413,37 @@ async fn zone_chain(
     }
 }
 
+/// Namen des Reverse Proxys: A/AAAA mit der passendsten Adresse dieses Geräts, andere
+/// Typen leer (der Name gehört nrzNetwork).
+fn local_host_answer(engine: &Engine, q: &QueryCtx, s: &DnsSettings) -> Option<Answer> {
+    let hosts = engine.local_hosts();
+    let candidates = hosts.candidates(&q.lname)?;
+    let ttl = PROXY_TTL;
+    let rdata = match q.qtype {
+        RecordType::A => crate::local::pick(candidates, q.client, true).map(|ip| match ip {
+            IpAddr::V4(a) => RData::A(rdata::A(a)),
+            IpAddr::V6(a) => RData::AAAA(rdata::AAAA(a)),
+        }),
+        RecordType::AAAA => crate::local::pick(candidates, q.client, false).map(|ip| match ip {
+            IpAddr::V4(a) => RData::A(rdata::A(a)),
+            IpAddr::V6(a) => RData::AAAA(rdata::AAAA(a)),
+        }),
+        _ => None,
+    };
+    let mut answer = match rdata {
+        Some(rd) => Answer::records(
+            ResponseKind::Authoritative,
+            vec![Record::from_rdata(q.name.clone(), ttl, rd)],
+        ),
+        None => Answer {
+            authority: vec![synthetic_soa(&q.lname, s, ttl)],
+            ..Answer::new(ResponseKind::Authoritative, ResponseCode::NoError)
+        },
+    };
+    answer.aa = true;
+    Some(answer)
+}
+
 /// Schritte 3–6: Sperren, lokale Antworten, Cache, Weiterleitung.
 async fn after_zones(
     engine: &Engine,
@@ -441,7 +481,7 @@ fn block_answer(engine: &Engine, q: &QueryCtx, s: &DnsSettings) -> Option<Answer
         }
         data.blocked_by(&q.lname)?.to_string()
     };
-    Some(blocked_answer(q, s, &hit))
+    Some(blocked_answer(engine, q, s, &hit))
 }
 
 /// Gesperrte Domain hinter einem CNAME einer weitergeleiteten Antwort (CNAME-Tarnung).
@@ -457,12 +497,12 @@ fn cname_block_check(engine: &Engine, q: &QueryCtx, s: &DnsSettings, answer: Ans
         })
     };
     match hit {
-        Some(hit) => blocked_answer(q, s, &hit),
+        Some(hit) => blocked_answer(engine, q, s, &hit),
         None => answer,
     }
 }
 
-fn blocked_answer(q: &QueryCtx, s: &DnsSettings, matched: &str) -> Answer {
+fn blocked_answer(engine: &Engine, q: &QueryCtx, s: &DnsSettings, matched: &str) -> Answer {
     let ttl = s.block_ttl;
     let soa = synthetic_soa(matched, s, ttl);
     let mut answer = match s.block_mode {
@@ -471,6 +511,26 @@ fn blocked_answer(q: &QueryCtx, s: &DnsSettings, matched: &str) -> Answer {
             authority: vec![soa],
             ..Answer::new(ResponseKind::Blocked, ResponseCode::NXDomain)
         },
+        BlockMode::BlockPage => {
+            let device = engine.device_addresses();
+            let ip = crate::local::pick(&device, q.client, q.qtype == RecordType::A);
+            let rdata = match (q.qtype, ip) {
+                (RecordType::A, Some(IpAddr::V4(a))) => Some(RData::A(rdata::A(a))),
+                (RecordType::A, _) => Some(RData::A(rdata::A(Ipv4Addr::UNSPECIFIED))),
+                (RecordType::AAAA, Some(IpAddr::V6(a))) => Some(RData::AAAA(rdata::AAAA(a))),
+                _ => None,
+            };
+            match rdata {
+                Some(rd) => Answer::records(
+                    ResponseKind::Blocked,
+                    vec![Record::from_rdata(q.name.clone(), ttl, rd)],
+                ),
+                None => Answer {
+                    authority: vec![soa],
+                    ..Answer::new(ResponseKind::Blocked, ResponseCode::NoError)
+                },
+            }
+        }
         BlockMode::NullAddress | BlockMode::CustomAddress => {
             let custom = s.block_mode == BlockMode::CustomAddress;
             let rdata = match q.qtype {
@@ -836,7 +896,7 @@ pub(crate) async fn resolve(
         let mut edns = Edns::new();
         edns.set_max_payload(EDNS_PAYLOAD);
         req.set_edns(edns);
-        let (resp, outcome) = process(engine, &req, &s).await;
+        let (resp, outcome) = process(engine, &req, &s, None).await;
         return Ok(ResolveResult {
             server: "Dieser Server".into(),
             rcode: rcode_str(resp.metadata.response_code),
@@ -866,6 +926,7 @@ pub(crate) async fn resolve(
         qclass: DNSClass::IN,
         dnssec_ok: false,
         checking_disabled: false,
+        client: None,
     };
     let mut query = upstream_query(&ctx);
     query.queries[0].name = ctx.name.clone();

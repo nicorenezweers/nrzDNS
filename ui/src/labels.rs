@@ -149,10 +149,12 @@ pub fn block_mode(m: BlockMode) -> String {
         BlockMode::NxDomain => tr("NXDOMAIN (Domain gibt es nicht)"),
         BlockMode::CustomAddress => tr("Eigene Adressen (z. B. Sperrseite)"),
         BlockMode::Refused => tr("REFUSED (abgelehnt)"),
+        BlockMode::BlockPage => tr("Sperrseite von nrzNetwork (freischalten und beantragen)"),
     }
 }
 
-pub const BLOCK_MODES: [BlockMode; 4] = [
+pub const BLOCK_MODES: [BlockMode; 5] = [
+    BlockMode::BlockPage,
     BlockMode::NullAddress,
     BlockMode::NxDomain,
     BlockMode::CustomAddress,
@@ -165,6 +167,7 @@ pub fn block_mode_key(m: BlockMode) -> &'static str {
         BlockMode::NxDomain => "nxDomain",
         BlockMode::CustomAddress => "customAddress",
         BlockMode::Refused => "refused",
+        BlockMode::BlockPage => "blockPage",
     }
 }
 

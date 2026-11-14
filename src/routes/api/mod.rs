@@ -9,7 +9,9 @@ mod logs;
 mod mcp;
 mod me;
 mod proxy;
+mod requests;
 mod settings;
+mod tools;
 mod zones;
 
 use rocket::http::{ContentType, Header};
@@ -28,7 +30,9 @@ pub fn routes() -> Vec<Route> {
     r.extend(mcp::routes());
     r.extend(me::routes());
     r.extend(proxy::routes());
+    r.extend(requests::routes());
     r.extend(settings::routes());
+    r.extend(tools::routes());
     r.extend(zones::routes());
     r
 }
@@ -36,7 +40,7 @@ pub fn routes() -> Vec<Route> {
 /// Lebenszeichen für Docker-Healthcheck und Monitoring.
 #[get("/health")]
 pub fn health() -> Value {
-    json!({ "status": "ok", "name": "nrzDNS", "version": env!("CARGO_PKG_VERSION") })
+    json!({ "status": "ok", "name": "nrzNetwork", "version": env!("CARGO_PKG_VERSION") })
 }
 
 /// Datei zum Herunterladen (Zonendatei, CSV): `Content-Disposition: attachment`.

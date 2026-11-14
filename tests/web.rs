@@ -14,7 +14,7 @@ async fn health() {
     let (s, v) = get(&client, "/api/v1/health").await;
     assert_eq!(s, Status::Ok);
     assert_eq!(v["status"], "ok");
-    assert_eq!(v["name"], "nrzDNS");
+    assert_eq!(v["name"], "nrzNetwork");
     assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
     client.terminate().await;
 }
