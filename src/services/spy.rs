@@ -199,7 +199,7 @@ fn parse(json: &str) -> Option<SpyReport> {
 }
 
 /// Letzter Bericht einer Domain.
-async fn latest(pool: &SqlitePool, domain: &str) -> AppResult<Option<SpyReport>> {
+pub async fn latest(pool: &SqlitePool, domain: &str) -> AppResult<Option<SpyReport>> {
     let row: Option<String> = sqlx::query_scalar(
         "SELECT report FROM spy_reports WHERE domain = ? ORDER BY scanned_at DESC LIMIT 1",
     )

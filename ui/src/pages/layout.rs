@@ -123,6 +123,7 @@ fn Sidebar() -> Element {
 
         nav { class: "flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-3",
             NavItem { to: Route::Dashboard { range: None }, label: tr("Dashboard"), active: matches!(route, Route::Dashboard { .. }), icon: rsx! { icons::LayoutDashboard {} } }
+            NavItem { to: Route::Map {}, label: tr("Netzwerkkarte"), active: matches!(route, Route::Map {}), icon: rsx! { icons::Network {} } }
             NavItem { to: Route::Zones {}, label: tr("Zonen"), active: matches!(route, Route::Zones {} | Route::ZoneView { .. }), icon: rsx! { icons::Globe {} } }
             NavItem { to: Route::Blocking {}, label: tr("Sperren"), active: matches!(route, Route::Blocking {}), icon: rsx! { icons::ShieldBan {} } }
             NavItem { to: Route::Allowed {}, label: tr("Ausnahmen"), active: matches!(route, Route::Allowed {}), icon: rsx! { icons::ShieldCheck {} } }

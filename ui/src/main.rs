@@ -21,6 +21,7 @@ use pages::cache::Cache;
 use pages::dashboard::Dashboard;
 use pages::devices::Devices;
 use pages::docker::Docker;
+use pages::map::NetworkMapPage as Map;
 use pages::domains::Domains;
 use pages::layout::AppLayout;
 use pages::logs::Logs;
@@ -87,6 +88,8 @@ pub enum Route {
         Monitor {},
         #[route("/docker")]
         Docker {},
+        #[route("/map")]
+        Map {},
         #[route("/tools")]
         Tools {},
         #[route("/resolve?:name&:qtype")]

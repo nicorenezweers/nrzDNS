@@ -9,6 +9,7 @@ pub mod docker;
 pub mod domains;
 pub mod layout;
 pub mod logs;
+pub mod map;
 pub mod monitor;
 pub mod netbird;
 pub mod not_found;

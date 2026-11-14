@@ -24,6 +24,7 @@ fn page_name(route: &Route) -> String {
         Route::Spy {} => tr("Spy"),
         Route::Monitor {} => tr("Zugriffe"),
         Route::Docker {} => tr("Docker"),
+        Route::Map {} => tr("Netzwerkkarte"),
         Route::Devices {} => tr("Geräte"),
         Route::Settings { section } => format!("{} → {section}", tr("Einstellungen")),
         _ => String::new(),

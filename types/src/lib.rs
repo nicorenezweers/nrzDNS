@@ -104,6 +104,7 @@
 //! | `POST /dieter/claude/install` | → [`DieterStatus`] (Claude CLI laden/aktualisieren) | Admin |
 //! | `GET /docker` | → [`DockerOverview`] (alle Container mit Namen, App, Image, Zustand, internen IPs, Ports; alle Netze mit Subnetz) | angemeldet |
 //! | `GET /docker/containers/<name>/logs?tail=` | → `Vec<String>` (letzte Log-Zeilen, höchstens 1000) | angemeldet |
+//! | `GET /topology` | → [`Topology`] (Netzwerkkarte: Punkte in den Bereichen Internet, Zugänge, nrzNetwork, Docker, LAN, NetBird und die Verbindungen dazwischen) | angemeldet |
 //! | `GET /docker/containers/<name>` | → Rohdaten von `docker inspect` (ohne Umgebungsvariablen) | angemeldet |
 //! | `GET /me/2fa` | → [`TwoFactorStatus`] | angemeldet |
 //! | `POST /me/2fa/setup` | → [`TwoFactorSetup`] (Geheimnis und QR-Code; erst mit enable aktiv) | angemeldet |
@@ -135,12 +136,14 @@ use serde::{Deserialize, Serialize};
 mod access;
 mod dieter;
 mod docker;
+mod topology;
 mod spy;
 mod tls;
 mod tools;
 pub use access::*;
 pub use dieter::*;
 pub use docker::*;
+pub use topology::*;
 pub use spy::*;
 pub use tls::*;
 pub use tools::*;

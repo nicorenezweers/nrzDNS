@@ -85,6 +85,7 @@ pub fn Dashboard(range: Option<String>) -> Element {
             Some(d) => rsx! {
                 div { class: if loading { "grid grid-cols-1 gap-6 opacity-70 transition-opacity" } else { "grid grid-cols-1 gap-6 transition-opacity" },
                     ListenWarnings { errors: d.server.listen_errors.clone() }
+                    crate::pages::map::NetworkMap { compact: true }
                     Totals { totals: d.totals.clone() }
                     div { class: "grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]",
                         Card { class: "gap-4 py-5",
