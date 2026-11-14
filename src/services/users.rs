@@ -18,7 +18,7 @@ macro_rules! select_users {
     ($rest:literal) => {
         concat!(
             "SELECT id, username, display_name, password_hash, role, disabled, preferences, \
-             created_at, last_login_at FROM users ",
+             created_at, last_login_at, totp_enabled FROM users ",
             $rest
         )
     };
@@ -38,6 +38,7 @@ struct UserRow {
     preferences: String,
     created_at: i64,
     last_login_at: Option<i64>,
+    totp_enabled: bool,
 }
 
 impl UserRow {
@@ -52,6 +53,7 @@ impl UserRow {
             last_login_at: self.last_login_at,
             // Fehlende Felder bekommen ihre Vorgabe (`#[serde(default)]`); kaputtes JSON auch.
             preferences: serde_json::from_str(&self.preferences).unwrap_or_default(),
+            totp_enabled: self.totp_enabled,
         }
     }
 }
@@ -374,5 +376,194 @@ pub async fn delete(pool: &SqlitePool, actor: &User, id: i64) -> AppResult<()> {
         .execute(pool)
         .await?;
     tracing::info!(user = %target.username, by = %actor.username, "Konto gelöscht");
+    Ok(())
+}
+
+// ------------------------------------------------------------------ Zwei-Faktor-Anmeldung
+
+use crate::auth::totp;
+use nrzdns_types::{TwoFactorCodes, TwoFactorSetup, TwoFactorStatus};
+
+type TotpRow = (String, bool, String, i64, String);
+
+async fn totp_row(pool: &SqlitePool, id: i64) -> AppResult<TotpRow> {
+    sqlx::query_as("SELECT totp_secret, totp_enabled, totp_pending, totp_last_step, recovery_codes FROM users WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
+pub async fn two_factor_status(pool: &SqlitePool, id: i64) -> AppResult<TwoFactorStatus> {
+    let (_, enabled, _, _, codes) = totp_row(pool, id).await?;
+    let left = serde_json::from_str::<Vec<String>>(&codes)
+        .map(|c| c.len())
+        .unwrap_or(0);
+    Ok(TwoFactorStatus {
+        enabled,
+        recovery_left: if enabled { left as u32 } else { 0 },
+    })
+}
+
+/// Neues Geheimnis vormerken (aktiv erst nach [`enable_two_factor`]).
+pub async fn setup_two_factor(pool: &SqlitePool, user: &User) -> AppResult<TwoFactorSetup> {
+    let (_, enabled, _, _, _) = totp_row(pool, user.id).await?;
+    if enabled {
+        return Err(AppError::Conflict(
+            "Die Zwei-Faktor-Anmeldung ist schon eingeschaltet.".into(),
+        ));
+    }
+    let secret = totp::new_secret();
+    sqlx::query("UPDATE users SET totp_pending = ? WHERE id = ?")
+        .bind(&secret)
+        .bind(user.id)
+        .execute(pool)
+        .await?;
+    let label = format!("nrzNetwork:{}", user.username);
+    let uri = format!(
+        "otpauth://totp/{}?secret={secret}&issuer=nrzNetwork&algorithm=SHA1&digits=6&period=30",
+        urlencoding::encode(&label)
+    );
+    let qr = qrcode::QrCode::new(uri.as_bytes()).map_err(|e| AppError::Config(e.to_string()))?;
+    let qr_svg = qr
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(220, 220)
+        .dark_color(qrcode::render::svg::Color("#000000"))
+        .light_color(qrcode::render::svg::Color("#ffffff"))
+        .build();
+    Ok(TwoFactorSetup {
+        secret,
+        uri,
+        qr_svg,
+    })
+}
+
+fn new_codes() -> (Vec<String>, String) {
+    let codes = totp::recovery_codes();
+    let hashes: Vec<String> = codes.iter().map(|c| totp::hash_code(c)).collect();
+    (
+        codes,
+        serde_json::to_string(&hashes).unwrap_or_else(|_| "[]".into()),
+    )
+}
+
+pub async fn enable_two_factor(
+    pool: &SqlitePool,
+    id: i64,
+    code: &str,
+) -> AppResult<TwoFactorCodes> {
+    let (_, enabled, pending, _, _) = totp_row(pool, id).await?;
+    if enabled {
+        return Err(AppError::Conflict(
+            "Die Zwei-Faktor-Anmeldung ist schon eingeschaltet.".into(),
+        ));
+    }
+    if pending.is_empty() {
+        return Err(AppError::bad("Bitte zuerst einrichten (QR-Code anzeigen)."));
+    }
+    let step = totp::verify(&pending, code, now(), 0).ok_or(AppError::TotpInvalid)?;
+    let (codes, hashes) = new_codes();
+    sqlx::query("UPDATE users SET totp_secret = ?, totp_enabled = 1, totp_pending = '', totp_last_step = ?, recovery_codes = ? WHERE id = ?")
+        .bind(&pending)
+        .bind(step)
+        .bind(hashes)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    tracing::info!(user = id, "Zwei-Faktor-Anmeldung eingeschaltet");
+    Ok(TwoFactorCodes {
+        recovery_codes: codes,
+    })
+}
+
+/// Zweiten Faktor prüfen: TOTP-Code oder (einmal verwendbarer) Wiederherstellungscode.
+pub async fn verify_second_factor(pool: &SqlitePool, id: i64, code: &str) -> AppResult<()> {
+    let (secret, enabled, _, last, codes) = totp_row(pool, id).await?;
+    if !enabled {
+        return Ok(());
+    }
+    if let Some(step) = totp::verify(&secret, code, now(), last) {
+        sqlx::query("UPDATE users SET totp_last_step = ? WHERE id = ?")
+            .bind(step)
+            .bind(id)
+            .execute(pool)
+            .await?;
+        return Ok(());
+    }
+    let mut list: Vec<String> = serde_json::from_str(&codes).unwrap_or_default();
+    let h = totp::hash_code(code);
+    if code.chars().filter(char::is_ascii_alphanumeric).count() == 10 {
+        if let Some(i) = list.iter().position(|x| *x == h) {
+            list.remove(i);
+            sqlx::query("UPDATE users SET recovery_codes = ? WHERE id = ?")
+                .bind(serde_json::to_string(&list).unwrap_or_else(|_| "[]".into()))
+                .bind(id)
+                .execute(pool)
+                .await?;
+            tracing::warn!(
+                user = id,
+                left = list.len(),
+                "Anmeldung mit Wiederherstellungscode"
+            );
+            return Ok(());
+        }
+    }
+    Err(AppError::TotpInvalid)
+}
+
+async fn check_password(pool: &SqlitePool, id: i64, password_plain: &str) -> AppResult<()> {
+    let r = row(pool, id).await?.ok_or(AppError::NotFound)?;
+    if password::verify(password_plain.to_string(), r.password_hash).await {
+        Ok(())
+    } else {
+        Err(AppError::bad("Das Passwort stimmt nicht."))
+    }
+}
+
+pub async fn disable_two_factor(
+    pool: &SqlitePool,
+    id: i64,
+    password_plain: &str,
+    code: &str,
+) -> AppResult<()> {
+    check_password(pool, id, password_plain).await?;
+    verify_second_factor(pool, id, code).await?;
+    reset_two_factor(pool, id).await?;
+    tracing::info!(user = id, "Zwei-Faktor-Anmeldung ausgeschaltet");
+    Ok(())
+}
+
+pub async fn regenerate_recovery(
+    pool: &SqlitePool,
+    id: i64,
+    password_plain: &str,
+    code: &str,
+) -> AppResult<TwoFactorCodes> {
+    check_password(pool, id, password_plain).await?;
+    let (_, enabled, _, _, _) = totp_row(pool, id).await?;
+    if !enabled {
+        return Err(AppError::bad("Die Zwei-Faktor-Anmeldung ist aus."));
+    }
+    verify_second_factor(pool, id, code).await?;
+    let (codes, hashes) = new_codes();
+    sqlx::query("UPDATE users SET recovery_codes = ? WHERE id = ?")
+        .bind(hashes)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(TwoFactorCodes {
+        recovery_codes: codes,
+    })
+}
+
+/// 2FA eines Kontos zurücksetzen (Admin oder beim Abschalten).
+pub async fn reset_two_factor(pool: &SqlitePool, id: i64) -> AppResult<()> {
+    let done = sqlx::query("UPDATE users SET totp_secret = '', totp_enabled = 0, totp_pending = '', totp_last_step = 0, recovery_codes = '[]' WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    if done.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
     Ok(())
 }

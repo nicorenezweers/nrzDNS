@@ -133,4 +133,6 @@ pub struct DieterThread {
 #[serde(rename_all = "camelCase", default)]
 pub struct DieterSendInput {
     pub text: String,
+    /// Seite, auf der der Benutzer gerade ist (nur für Dieter, nicht angezeigt).
+    pub context: String,
 }

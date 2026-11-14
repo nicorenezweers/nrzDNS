@@ -90,11 +90,7 @@ async fn create(
         .take(60)
         .collect();
     let id = dieter::create_conversation(pool, &title, false).await?;
-    if let Err(e) = dieter::send(
-        &ctx(pool, config, engine, state, comps, proxy),
-        id,
-        &body.text,
-    )
+    if let Err(e) = dieter::send_with_context(&ctx(pool, config, engine, state, comps, proxy), id, &body.text, &body.context)
     .await
     {
         dieter::delete_conversation(pool, id).await.ok();
@@ -128,11 +124,7 @@ async fn send(
 ) -> AppResult<Json<DieterThread>> {
     not_dieter(&a)?;
     dieter::thread(pool, state, id).await?;
-    dieter::send(
-        &ctx(pool, config, engine, state, comps, proxy),
-        id,
-        &body.text,
-    )
+    dieter::send_with_context(&ctx(pool, config, engine, state, comps, proxy), id, &body.text, &body.context)
     .await?;
     Ok(Json(dieter::thread(pool, state, id).await?))
 }

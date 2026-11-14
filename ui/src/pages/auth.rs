@@ -56,6 +56,9 @@ fn go(target: &str) {
 pub fn Login(next: String) -> Element {
     let mut username = use_signal(String::new);
     let mut password = use_signal(String::new);
+    let mut code = use_signal(String::new);
+    // Passwort stimmte, jetzt der Code aus der Authenticator-App
+    let mut need_code = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let mut busy = use_signal(|| false);
     let status = use_resource(|| api::get::<AuthStatus>("/auth/status"));
@@ -84,6 +87,7 @@ pub fn Login(next: String) -> Element {
                 &LoginInput {
                     username: username().trim().to_string(),
                     password: password(),
+                    code: code().trim().to_string(),
                 },
             )
             .await;
@@ -94,11 +98,19 @@ pub fn Login(next: String) -> Element {
                 }
                 Err(e) => {
                     busy.set(false);
-                    error.set(Some(if e.status == 401 {
-                        tr("Benutzername oder Passwort stimmt nicht.")
+                    if e.code == "totp_required" {
+                        need_code.set(true);
+                        error.set(None);
+                    } else if e.status == 401 && need_code() {
+                        code.set(String::new());
+                        error.set(Some(tr("Der Code stimmt nicht – bitte den aktuellen Code oder einen Wiederherstellungscode eingeben.")));
                     } else {
-                        e.message
-                    }));
+                        error.set(Some(if e.status == 401 {
+                            tr("Benutzername oder Passwort stimmt nicht.")
+                        } else {
+                            e.message
+                        }));
+                    }
                 }
             }
         });
@@ -109,11 +121,23 @@ pub fn Login(next: String) -> Element {
                 if let Some(e) = error() {
                     Callout { text: e, error: true }
                 }
-                Field { label: tr("Benutzername"),
-                    input { class: INPUT, autocomplete: "username", autocapitalize: "none", autofocus: true, required: true, value: "{username}", oninput: move |e| username.set(e.value()) }
-                }
-                Field { label: tr("Passwort"),
-                    input { class: INPUT, r#type: "password", autocomplete: "current-password", required: true, value: "{password}", oninput: move |e| password.set(e.value()) }
+                if need_code() {
+                    div { class: "flex items-center gap-3 rounded-lg border bg-muted/30 p-3 text-sm",
+                        icons::ShieldCheck { class: "size-5 shrink-0" }
+                        span { {tr("Zwei-Faktor-Anmeldung: Gib den 6-stelligen Code aus deiner Authenticator-App ein – oder einen Wiederherstellungscode.")} }
+                    }
+                    Field { label: tr("Code"),
+                        input { class: "{INPUT} text-center font-mono text-lg tracking-[0.3em]", autocomplete: "one-time-code", inputmode: "numeric", autofocus: true, required: true, maxlength: 12,
+                            placeholder: "123456", value: "{code}", oninput: move |e| code.set(e.value()) }
+                    }
+                    button { class: "text-left text-xs text-muted-foreground hover:underline", r#type: "button", onclick: move |_| { need_code.set(false); code.set(String::new()); password.set(String::new()); }, {tr("Zurück zu Benutzername und Passwort")} }
+                } else {
+                    Field { label: tr("Benutzername"),
+                        input { class: INPUT, autocomplete: "username", autocapitalize: "none", autofocus: true, required: true, value: "{username}", oninput: move |e| username.set(e.value()) }
+                    }
+                    Field { label: tr("Passwort"),
+                        input { class: INPUT, r#type: "password", autocomplete: "current-password", required: true, value: "{password}", oninput: move |e| password.set(e.value()) }
+                    }
                 }
                 button { class: "{btn(BTN_PRIMARY)} w-full", disabled: busy(), r#type: "submit",
                     if busy() {

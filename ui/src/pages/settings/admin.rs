@@ -58,6 +58,9 @@ pub fn Users() -> Element {
                                         if u.disabled {
                                             span { class: "rounded-full border border-destructive/40 px-2 py-0.5 text-[11px] text-destructive", {tr("gesperrt")} }
                                         }
+                                        if u.totp_enabled {
+                                            span { class: "inline-flex items-center gap-1 rounded-full border border-emerald-500/40 px-2 py-0.5 text-[11px] text-emerald-500", title: tr("Zwei-Faktor-Anmeldung an"), icons::ShieldCheck { class: "size-3" } "2FA" }
+                                        }
                                         if u.id == me {
                                             span { class: "text-muted-foreground", {tr("(du)")} }
                                         }
@@ -81,6 +84,26 @@ pub fn Users() -> Element {
                                             }
                                         },
                                         icons::Pencil {}
+                                    }
+                                    if u.totp_enabled && u.id != me {
+                                        button { class: ICON_BTN, title: tr("2FA zurücksetzen"),
+                                            onclick: {
+                                                let u = u.clone();
+                                                move |_| {
+                                                    let u = u.clone();
+                                                    spawn(async move {
+                                                        let ask = Ask::new(trf("2FA von „{0}“ zurücksetzen?", &[&u.username]), tr("Für den Fall, dass das Telefon verloren ist: Die Person meldet sich danach nur mit Passwort an und sollte 2FA sofort neu einrichten.")).confirm(tr("Zurücksetzen")).destructive();
+                                                        if confirm(ask).await {
+                                                            match api::delete(&format!("/admin/users/{}/2fa", u.id)).await {
+                                                                Ok(()) => { toast(tr("2FA zurückgesetzt.")); version += 1; }
+                                                                Err(e) => toast_error(e),
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                            },
+                                            icons::ShieldOff {}
+                                        }
                                     }
                                     if u.id != me {
                                         button { class: icon_btn("hover:text-destructive"), title: tr("Konto löschen"),

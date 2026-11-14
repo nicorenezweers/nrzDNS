@@ -31,7 +31,9 @@ nrzNetwork answers the DNS queries of your whole network from one small program.
 | **NetBird** | Your whole NetBird network through the NetBird API (cloud or self-hosted): **devices** (rename, groups, SSH, login expiry, remove), **groups**, **access rules** (who may reach whom, protocols, ports), **networks** (resources and routing peers), **DNS** (nameserver groups, plus one click: *nrzNetwork as DNS for all NetBird devices*), **setup keys** (with ready-to-copy `netbird up` command) and **users** (invite, role, block). The Devices page shows NetBird names automatically. |
 | **Requests (monitor)** | Who opens your websites behind the reverse proxy: requests, visitors, data, errors, timeline, per site, top pages, sources (Cloudflare with real client IP and country, NetBird, LAN, internet), browsers and bots, status codes, visitors with device/NetBird names and a live feed. Retention configurable. |
 | **Cloudflare Tunnel & NetBird built in** | nrzNetwork downloads `cloudflared` and the NetBird client itself (official GitHub releases, SHA-256 verified), supervises and restarts them and installs updates daily at a chosen hour. Reverse proxy entries can be made public with one switch: nrzNetwork sets the tunnel ingress rule and the proxied CNAME (foreign rules stay). NetBird runs rootless in netstack mode; a setup key can be created through the NetBird API. NetBird's own reverse proxy ("Services") is manageable on the NetBird page. |
-| **Dieter (AI assistant)** | An AI assistant for the whole network via **OpenRouter**, **Grok (xAI)** or the **Claude CLI** (downloaded and verified by nrzNetwork). He can use the entire nrzNetwork API (zones, Cloudflare DNS records, reverse proxy, blocking, NetBird, tunnel, components, Spy, requests) and DNS lookups — read only or, if allowed, also change things (accounts, credentials and his own settings excluded; every change is logged). Built-in monitoring checks DNS forwarding, SERVFAIL rate, tunnel/NetBird, proxy targets, 5xx rates, the certificate and Spy; on a new problem Dieter steps in automatically and reports what he found and fixed. |
+| **Dieter (AI assistant)** | An AI assistant for the whole network via **OpenRouter**, **Grok (xAI)** or the **Claude CLI** (downloaded and verified by nrzNetwork). He can use the entire nrzNetwork API (zones, Cloudflare DNS records, reverse proxy, blocking, NetBird, tunnel, components, Spy, requests) and DNS lookups — read only or, if allowed, also change things (accounts, credentials and his own settings excluded; every change is logged). Built-in monitoring checks DNS forwarding, SERVFAIL rate, tunnel/NetBird, proxy targets, 5xx rates, the certificate and Spy; on a new problem Dieter steps in automatically and reports what he found and fixed. He lives as a **chat window in the bottom-right corner of every page** (knows which page you are on, suggestions, Markdown answers, collapsible steps, badge for open problems); setup under Settings → Dieter. |
+| **Docker** | Read-only view of the whole Docker host like `docker ps`: every container with name, app, state, **internal IPs per network**, ports and image, all Docker networks with subnet/gateway and members, and the last log lines per container. Container names also show up in the request monitor, and Dieter can use it. Needs `/var/run/docker.sock` mounted read-only. |
+| **Two-factor sign-in (2FA)** | TOTP with any authenticator app (QR code), 10 one-time recovery codes, codes can't be reused, failed codes count towards the login throttle; admins can reset 2FA for a user. |
 | **Spy** | Only for your own domains (Cloudflare zones, HTTPS names): what attackers can learn from public sources — subdomains and emails in Certificate Transparency logs, registrar and contacts (RDAP/WHOIS), DNS records, name server and mail providers, SPF/DMARC/DKIM/CAA/DNSSEC, services revealed by TXT records, the hosting provider of every address, internal addresses in public DNS, records pointing at your home connection, dangling CNAMEs (subdomain takeover), Cloudflare errors — plus active checks: web servers (version leaks, HSTS, security headers, public admin panels, HTTP only) and **all 65,535 ports** of every directly reachable address and of your own connection. Every finding comes with step-by-step instructions and a link to the place in nrzNetwork to fix it. Scans run daily at a chosen hour; the history keeps 60 reports per domain with the changes since the previous scan. |
 | **HTTPS for your own domains** | A real Let's Encrypt certificate (e.g. `zweers.ch` + `*.zweers.ch`) obtained through the DNS-01 challenge with a **Cloudflare API token** — nothing has to be reachable from outside, it works purely in the local network. Entries then open as `https://music.zweers.ch` without a warning; `http://` can redirect to `https://`. Renews automatically when a third of the lifetime is left. HTTPS for names without an own certificate (e.g. umbrelOS's own HTTPS) is passed through untouched by SNI. |
 | **Block page** | Blocked domains can point at nrzNetwork itself (block mode *block page*, the default): `http://` sites show "This site was blocked by nrzNetwork" with buttons to **unlock it for a while** (15 min, 1 h, 4 h – configurable) and a form to **ask for permanent access**; the admin approves or rejects requests under *Allowed*. Unlocks end by themselves. |
@@ -50,7 +52,7 @@ You need Docker. The image contains the program and the web interface.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.10.0
+  ghcr.io/nicorenezweers/nrz-dns:1.11.0
 ```
 
 The image is multi-arch (`linux/amd64`, `linux/arm64`) and is published for every [release](https://github.com/nicorenezweers/nrzDNS/releases). To build it yourself instead:
@@ -70,7 +72,7 @@ Open <http://localhost:8380>. The first account you create becomes the administr
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.10.0   # or: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.11.0   # or: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -104,10 +106,10 @@ The container runs as user `1000` without any capabilities. Docker (20.10 and la
 Every [release](https://github.com/nicorenezweers/nrzDNS/releases) has the program for Linux (`amd64`, `arm64`) as a single file, with `SHA256SUMS`. It brings its own root certificates for DoT, DoH and blocklist downloads.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.10.0/nrzdns-1.10.0-linux-amd64
-chmod +x nrzdns-1.10.0-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.10.0-linux-amd64   # allow port 53 without root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.10.0-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.11.0/nrzdns-1.11.0-linux-amd64
+chmod +x nrzdns-1.11.0-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.11.0-linux-amd64   # allow port 53 without root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.11.0-linux-amd64
 ```
 
 To try it without touching port 53, let it listen elsewhere, e.g. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, and ask it with `dig @127.0.0.1 -p 5353 example.com`.
@@ -115,7 +117,7 @@ To try it without touching port 53, let it listen elsewhere, e.g. `NRZDNS_DNS_LI
 ### Both architectures
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.10.0 --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.11.0 --push .
 ```
 
 Rust is cross-compiled, not emulated, so the arm64 build is fast on an x86 machine and vice versa. Only the program, gzipped per architecture (for the Umbrel app): `scripts/store-binaries.sh <folder>`.

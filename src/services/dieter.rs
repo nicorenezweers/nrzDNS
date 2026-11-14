@@ -361,6 +361,11 @@ pub async fn delete_conversation(pool: &SqlitePool, id: i64) -> AppResult<()> {
 
 /// Nachricht senden – Dieter antwortet im Hintergrund.
 pub async fn send(ctx: &Ctx, conv: i64, text: &str) -> AppResult<()> {
+    send_with_context(ctx, conv, text, "").await
+}
+
+/// Wie [`send`], mit der Seite, auf der der Benutzer gerade ist.
+pub async fn send_with_context(ctx: &Ctx, conv: i64, text: &str, context: &str) -> AppResult<()> {
     let text = text.trim();
     if text.is_empty() || text.len() > 20_000 {
         return Err(AppError::bad(
@@ -379,6 +384,12 @@ pub async fn send(ctx: &Ctx, conv: i64, text: &str) -> AppResult<()> {
             "Dieter arbeitet noch an der letzten Nachricht.".into(),
         ));
     }
+    let context: String = context.trim().chars().take(120).collect();
+    let for_model = if context.is_empty() {
+        text.to_string()
+    } else {
+        format!("{text}\n\n[Der Benutzer ist gerade auf der Seite „{context}“ von nrzNetwork.]")
+    };
     add_message(
         &ctx.pool,
         conv,
@@ -386,11 +397,11 @@ pub async fn send(ctx: &Ctx, conv: i64, text: &str) -> AppResult<()> {
         text,
         "",
         "",
-        &json!({ "role": "user", "content": text }).to_string(),
+        &json!({ "role": "user", "content": for_model }).to_string(),
     )
     .await?;
     let ctx2 = ctx.clone();
-    let text = text.to_string();
+    let text = for_model;
     tokio::spawn(async move {
         let result = match s.settings.provider {
             DieterProvider::ClaudeCli => run_claude(&ctx2, &s, conv, &text).await,
@@ -458,9 +469,10 @@ Adressen dieses Geräts: {device}. Jetzt: {time} (Unix {unix}).\n\n\
 Werkzeuge: `api_request` ruft die REST-API von nrzNetwork auf (Pfad ohne /api/v1, z. B. GET /proxy, PUT /proxy/hosts/3), \
 `dns_lookup` fragt DNS (leerer server = nrzNetwork selbst mit eigenen Zonen und Sperren; sonst z. B. 1.1.1.1 für die Sicht von aussen). \
 Cloudflare-API: /cloudflare/<pfad> (Zonen lesen, DNS-Einträge verwalten), NetBird-API: /netbird/<pfad> (peers, groups, policies, networks, dns, setup-keys, users, reverse-proxies). \
+Docker (nur lesend): GET /docker (alle Container mit Namen, internen IPs, Netzen, Ports; auch Docker-Netze), GET /docker/containers/<name>/logs?tail=200, GET /docker/containers/<name>. \
 {changes}\n\n\
 Arbeitsweise: Erst Zustand prüfen (lesen), dann handeln. Vor dem Löschen oder Überschreiben genau prüfen, ob es das Richtige ist. \
-Nach einer Änderung prüfen, ob sie gewirkt hat. Keine Schlüssel oder Tokens ausgeben. Antworte auf Deutsch, knapp, mit dem, was du gefunden und getan hast; \
+Nach einer Änderung prüfen, ob sie gewirkt hat. Keine Schlüssel oder Tokens ausgeben. Antworte auf Deutsch, knapp und übersichtlich (Markdown: kurze Absätze, Listen, **fett**, `code`), mit dem, was du gefunden und getan hast; \
 wenn etwas nur der Besitzer tun kann (z. B. ein Token besorgen), sag genau wie.\n\nAPI:\n{api}",
         ver = crate::VERSION,
         time = jiff::Timestamp::now().to_zoned(components::time_zone()).strftime("%Y-%m-%d %H:%M %Z"),
@@ -531,7 +543,14 @@ fn allowed(method: &str, path: &str, allow_changes: bool) -> Result<(), String> 
         return Err("Pfad muss mit / beginnen.".into());
     }
     let p = path.split('?').next().unwrap_or_default();
-    for blocked in ["/auth", "/users", "/dieter", "/settings/mcp", "/account"] {
+    for blocked in [
+        "/auth",
+        "/users",
+        "/dieter",
+        "/settings/mcp",
+        "/account",
+        "/me",
+    ] {
         if p == blocked || p.starts_with(&format!("{blocked}/")) {
             return Err(format!("{blocked} ist für Dieter gesperrt."));
         }

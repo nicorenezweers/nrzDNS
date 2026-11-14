@@ -3,14 +3,26 @@
 use crate::auth::{session, CurrentUser};
 use crate::error::AppResult;
 use crate::services::users;
-use nrzdns_types::{ChangePasswordInput, UpdateMeInput, User};
+use nrzdns_types::{
+    ChangePasswordInput, TwoFactorCodes, TwoFactorInput, TwoFactorSetup, TwoFactorStatus,
+    UpdateMeInput, User,
+};
 use rocket::http::{CookieJar, Status};
 use rocket::serde::json::Json;
-use rocket::{get, put, routes, Route, State};
+use rocket::{get, post, put, routes, Route, State};
 use sqlx::SqlitePool;
 
 pub fn routes() -> Vec<Route> {
-    routes![me, update_me, change_password]
+    routes![
+        me,
+        update_me,
+        change_password,
+        tf_status,
+        tf_setup,
+        tf_enable,
+        tf_disable,
+        tf_recovery
+    ]
 }
 
 #[get("/me")]
@@ -44,4 +56,63 @@ async fn change_password(
     };
     tracing::info!(user = %user.0.username, "Passwort geändert");
     Ok(Status::NoContent)
+}
+
+// ------------------------------------------------------------------ Zwei-Faktor-Anmeldung
+
+fn not_internal(user: &CurrentUser) -> AppResult<()> {
+    if user.id() == 0 {
+        return Err(crate::error::AppError::forbidden("Nicht für Dieter."));
+    }
+    Ok(())
+}
+
+#[get("/me/2fa")]
+async fn tf_status(
+    user: CurrentUser,
+    pool: &State<SqlitePool>,
+) -> AppResult<Json<TwoFactorStatus>> {
+    not_internal(&user)?;
+    Ok(Json(users::two_factor_status(pool, user.id()).await?))
+}
+
+#[post("/me/2fa/setup")]
+async fn tf_setup(user: CurrentUser, pool: &State<SqlitePool>) -> AppResult<Json<TwoFactorSetup>> {
+    not_internal(&user)?;
+    Ok(Json(users::setup_two_factor(pool, &user.0).await?))
+}
+
+#[post("/me/2fa/enable", data = "<body>")]
+async fn tf_enable(
+    user: CurrentUser,
+    body: Json<TwoFactorInput>,
+    pool: &State<SqlitePool>,
+) -> AppResult<Json<TwoFactorCodes>> {
+    not_internal(&user)?;
+    Ok(Json(
+        users::enable_two_factor(pool, user.id(), &body.code).await?,
+    ))
+}
+
+#[post("/me/2fa/disable", data = "<body>")]
+async fn tf_disable(
+    user: CurrentUser,
+    body: Json<TwoFactorInput>,
+    pool: &State<SqlitePool>,
+) -> AppResult<Status> {
+    not_internal(&user)?;
+    users::disable_two_factor(pool, user.id(), &body.password, &body.code).await?;
+    Ok(Status::NoContent)
+}
+
+#[post("/me/2fa/recovery", data = "<body>")]
+async fn tf_recovery(
+    user: CurrentUser,
+    body: Json<TwoFactorInput>,
+    pool: &State<SqlitePool>,
+) -> AppResult<Json<TwoFactorCodes>> {
+    not_internal(&user)?;
+    Ok(Json(
+        users::regenerate_recovery(pool, user.id(), &body.password, &body.code).await?,
+    ))
 }

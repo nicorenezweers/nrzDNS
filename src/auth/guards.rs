@@ -233,5 +233,6 @@ fn dieter_user(req: &Request<'_>) -> Option<User> {
         created_at: 0,
         last_login_at: None,
         preferences: Default::default(),
+        totp_enabled: false,
     })
 }

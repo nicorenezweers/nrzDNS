@@ -79,6 +79,12 @@ const ITEMS: &[Item] = &[
         admin_only: false,
     },
     Item {
+        key: "dieter",
+        label: "Dieter",
+        group: "Instanz",
+        admin_only: false,
+    },
+    Item {
         key: "mcp",
         label: "MCP",
         group: "Instanz",
@@ -120,6 +126,7 @@ fn icon(key: &str) -> Element {
         "account" => rsx! { icons::User {} },
         "users" => rsx! { icons::Users {} },
         "mcp" => rsx! { icons::Plug {} },
+        "dieter" => rsx! { icons::Bot {} },
         "integrations" => rsx! { icons::Cable {} },
         "components" => rsx! { icons::Boxes {} },
         _ => rsx! { icons::Info {} },
@@ -167,6 +174,7 @@ pub fn Settings(section: String) -> Element {
                     "info" => rsx! { info::Info {} },
                     "integrations" => rsx! { integrations::Integrations {} },
                     "components" => rsx! { components::ComponentsPage {} },
+                    "dieter" => rsx! { crate::pages::dieter::DieterSettingsPage {} },
                     _ => rsx! { Callout { text: tr("Diesen Bereich gibt es nicht oder er ist nur für Administratoren.") } },
                 }
             }

@@ -89,6 +89,7 @@ fn Shell() -> Element {
             }
         }
         ShortcutsHelp {}
+        crate::pages::dieter::DieterWidget {}
     }
 }
 
@@ -122,7 +123,6 @@ fn Sidebar() -> Element {
 
         nav { class: "flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-3",
             NavItem { to: Route::Dashboard { range: None }, label: tr("Dashboard"), active: matches!(route, Route::Dashboard { .. }), icon: rsx! { icons::LayoutDashboard {} } }
-            NavItem { to: Route::Dieter {}, label: tr("Dieter"), active: matches!(route, Route::Dieter {}), icon: rsx! { icons::Bot {} } }
             NavItem { to: Route::Zones {}, label: tr("Zonen"), active: matches!(route, Route::Zones {} | Route::ZoneView { .. }), icon: rsx! { icons::Globe {} } }
             NavItem { to: Route::Blocking {}, label: tr("Sperren"), active: matches!(route, Route::Blocking {}), icon: rsx! { icons::ShieldBan {} } }
             NavItem { to: Route::Allowed {}, label: tr("Ausnahmen"), active: matches!(route, Route::Allowed {}), icon: rsx! { icons::ShieldCheck {} } }
@@ -134,6 +134,7 @@ fn Sidebar() -> Element {
             NavItem { to: Route::Devices {}, label: tr("Geräte"), active: matches!(route, Route::Devices {}), icon: rsx! { icons::MonitorSmartphone {} } }
             NavItem { to: Route::Netbird {}, label: tr("NetBird"), active: matches!(route, Route::Netbird {}), icon: rsx! { icons::Waypoints {} } }
             NavItem { to: Route::Domains {}, label: tr("DNS-Einträge"), active: matches!(route, Route::Domains {}), icon: rsx! { icons::Globe {} } }
+            NavItem { to: Route::Docker {}, label: tr("Docker"), active: matches!(route, Route::Docker {}), icon: rsx! { icons::Container {} } }
             NavItem { to: Route::Spy {}, label: tr("Spy"), active: matches!(route, Route::Spy {}), icon: rsx! { icons::ScanEye {} } }
             NavItem { to: Route::Tools {}, label: tr("Netzwerk-Tools"), active: matches!(route, Route::Tools {}), icon: rsx! { icons::Wrench {} } }
             div { class: "my-2 h-px bg-sidenav-border" }

@@ -42,6 +42,20 @@ impl Fairing for ProxyServer {
                 state.clone(),
                 rocket.shutdown(),
             ));
+            {
+                // Containernamen je IP (Zugriffe), jede Minute
+                let config = config.clone();
+                let mut shutdown = rocket.shutdown();
+                tokio::spawn(async move {
+                    loop {
+                        crate::services::docker::refresh_names(&config).await;
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+                            _ = &mut shutdown => break,
+                        }
+                    }
+                });
+            }
             tokio::spawn(write_access_log(
                 pool.clone(),
                 state.clone(),

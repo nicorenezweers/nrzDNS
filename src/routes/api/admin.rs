@@ -17,7 +17,8 @@ pub fn routes() -> Vec<Route> {
         update_user,
         delete_user,
         get_instance,
-        put_instance
+        put_instance,
+        reset_two_factor
     ]
 }
 
@@ -85,4 +86,19 @@ async fn put_instance(
     settings::set(pool, settings::INSTANCE, &body.0).await?;
     tracing::info!(by = %admin.0.username, "Einstellungen der Instanz geändert");
     Ok(body)
+}
+
+/// Zwei-Faktor-Anmeldung eines Kontos zurücksetzen (z. B. Telefon verloren).
+#[delete("/admin/users/<id>/2fa")]
+async fn reset_two_factor(
+    admin: AdminUser,
+    id: i64,
+    pool: &State<SqlitePool>,
+) -> AppResult<Status> {
+    if admin.id() == 0 {
+        return Err(crate::error::AppError::forbidden("Nicht für Dieter."));
+    }
+    users::reset_two_factor(pool, id).await?;
+    tracing::warn!(user = id, by = %admin.0.username, "Zwei-Faktor-Anmeldung zurückgesetzt");
+    Ok(Status::NoContent)
 }

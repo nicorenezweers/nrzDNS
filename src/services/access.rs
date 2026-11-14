@@ -71,7 +71,10 @@ fn period_secs(period: &str) -> AppResult<(i64, i64)> {
 
 /// Bekannte Namen: eigene Gerätenamen und NetBird-Geräte.
 async fn names(pool: &SqlitePool) -> HashMap<String, String> {
-    let mut map: HashMap<String, String> = HashMap::new();
+    let mut map: HashMap<String, String> = crate::services::docker::cached_names()
+        .into_iter()
+        .map(|(ip, n)| (ip, format!("Container {n}")))
+        .collect();
     for (ip, name) in integrations::netbird_peer_names(pool).await {
         map.insert(ip.to_string(), name);
     }

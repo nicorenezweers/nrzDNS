@@ -66,6 +66,7 @@ pub fn Account() -> Element {
             }
         }
         Prefs {}
+        TwoFactor {}
         Section { title: tr("Passwort ändern"), description: tr("Danach sind alle anderen Geräte abgemeldet."),
             form { class: "grid grid-cols-1 max-w-3xl gap-4 sm:grid-cols-3 sm:items-end",
                 onsubmit: move |e| {
@@ -190,6 +191,117 @@ fn Prefs() -> Element {
                                 option { value: "{p.logs_per_page}", selected: true, "{p.logs_per_page}" }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Zwei-Faktor-Anmeldung einrichten, Codes, abschalten.
+#[component]
+fn TwoFactor() -> Element {
+    let mut version = use_signal(|| 0u64);
+    let status = use_resource(move || async move {
+        let _ = version();
+        api::get::<nrzdns_types::TwoFactorStatus>("/me/2fa").await
+    });
+    let mut setup = use_signal(|| None::<nrzdns_types::TwoFactorSetup>);
+    let mut codes = use_signal(Vec::<String>::new);
+    let mut code = use_signal(String::new);
+    let mut password = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+    let start = move |_| {
+        spawn(async move {
+            busy.set(true);
+            let r = api::action::<nrzdns_types::TwoFactorSetup>("/me/2fa/setup").await;
+            busy.set(false);
+            match r {
+                Ok(s) => { setup.set(Some(s)); code.set(String::new()); }
+                Err(e) => toast_error(e),
+            }
+        });
+    };
+    let enable = move |e: FormEvent| {
+        e.prevent_default();
+        spawn(async move {
+            busy.set(true);
+            let r = api::post::<nrzdns_types::TwoFactorCodes, _>("/me/2fa/enable", &nrzdns_types::TwoFactorInput { code: code().trim().to_string(), password: String::new() }).await;
+            busy.set(false);
+            match r {
+                Ok(c) => { codes.set(c.recovery_codes); setup.set(None); code.set(String::new()); toast(tr("Zwei-Faktor-Anmeldung ist an.")); version += 1; }
+                Err(e) => toast_error(e),
+            }
+        });
+    };
+    let with_password = move |path: &'static str, disable: bool| {
+        spawn(async move {
+            busy.set(true);
+            let body = nrzdns_types::TwoFactorInput { code: code().trim().to_string(), password: password() };
+            let r = if disable {
+                api::send::<serde_json::Value, _>("POST", path, &body).await.map(|_| Vec::new())
+            } else {
+                api::post::<nrzdns_types::TwoFactorCodes, _>(path, &body).await.map(|c| c.recovery_codes)
+            };
+            busy.set(false);
+            match r {
+                Ok(c) => {
+                    codes.set(c);
+                    code.set(String::new());
+                    password.set(String::new());
+                    toast(if disable { tr("Zwei-Faktor-Anmeldung ist aus.") } else { tr("Neue Wiederherstellungscodes erstellt.") });
+                    version += 1;
+                }
+                Err(e) => toast_error(e),
+            }
+        });
+    };
+    let enabled = matches!(&*status.read(), Some(Ok(s)) if s.enabled);
+    let left = match &*status.read() { Some(Ok(s)) => s.recovery_left, _ => 0 };
+    rsx! {
+        Section { title: tr("Zwei-Faktor-Anmeldung (2FA)"), description: tr("Zusätzlich zum Passwort ein Code aus einer Authenticator-App (Google Authenticator, Aegis, 1Password, Bitwarden …). Schützt dein Konto, auch wenn jemand dein Passwort kennt."),
+            div { class: "grid max-w-3xl gap-4",
+                if !codes().is_empty() {
+                    div { class: "rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm",
+                        p { class: "mb-2 font-medium", {tr("Wiederherstellungscodes – jetzt sicher aufbewahren!")} }
+                        p { class: "mb-3 text-muted-foreground", {tr("Jeder Code funktioniert einmal, falls du dein Telefon nicht hast. Sie werden nur jetzt angezeigt.")} }
+                        div { class: "grid grid-cols-2 gap-1 font-mono sm:grid-cols-5", for c in codes().iter() { span { key: "{c}", "{c}" } } }
+                        div { class: "mt-3 flex gap-2",
+                            CopyButton { text: codes().join("\n") }
+                            button { class: btn_sm(BTN_GHOST), onclick: move |_| codes.set(Vec::new()), {tr("Ich habe sie gespeichert")} }
+                        }
+                    }
+                }
+                if enabled {
+                    div { class: "flex flex-wrap items-center gap-2 text-sm",
+                        span { class: "inline-flex items-center gap-1.5 font-medium text-emerald-500", icons::ShieldCheck { class: "size-4" } {tr("An")} }
+                        span { class: "text-muted-foreground", {trf("{0} Wiederherstellungscodes übrig", &[&left.to_string()])} }
+                    }
+                    div { class: "grid grid-cols-1 gap-3 sm:grid-cols-2",
+                        Field { label: tr("Passwort"), input { class: INPUT, r#type: "password", autocomplete: "current-password", value: "{password}", oninput: move |e| password.set(e.value()) } }
+                        Field { label: tr("Code aus der App"), input { class: "{INPUT} font-mono", inputmode: "numeric", autocomplete: "one-time-code", value: "{code}", oninput: move |e| code.set(e.value()) } }
+                    }
+                    div { class: "flex flex-wrap gap-2",
+                        button { class: btn(BTN_OUTLINE), disabled: busy() || password().is_empty() || code().trim().is_empty(), onclick: move |_| with_password("/me/2fa/recovery", false), {tr("Neue Wiederherstellungscodes")} }
+                        button { class: btn(BTN_GHOST), disabled: busy() || password().is_empty() || code().trim().is_empty(), onclick: move |_| with_password("/me/2fa/disable", true), {tr("2FA ausschalten")} }
+                    }
+                } else if let Some(s) = setup() {
+                    div { class: "grid gap-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-start",
+                        div { class: "rounded-lg bg-white p-2", dangerous_inner_html: "{s.qr_svg}" }
+                        div { class: "grid gap-3 text-sm",
+                            p { {tr("1. Den QR-Code mit deiner Authenticator-App scannen – oder den Schlüssel abtippen:")} }
+                            div { class: "flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1 font-mono text-xs break-all", span { class: "flex-1", "{s.secret}" } CopyButton { text: s.secret.clone() } }
+                            p { {tr("2. Den 6-stelligen Code aus der App eingeben:")} }
+                            form { class: "flex gap-2", onsubmit: enable,
+                                input { class: "{INPUT} w-40 text-center font-mono text-lg tracking-[0.3em]", inputmode: "numeric", autocomplete: "one-time-code", required: true, maxlength: 7, placeholder: "123456", value: "{code}", oninput: move |e| code.set(e.value()) }
+                                button { class: btn(BTN_PRIMARY), r#type: "submit", disabled: busy(), {tr("Einschalten")} }
+                            }
+                        }
+                    }
+                } else {
+                    div { class: "flex flex-wrap items-center gap-3",
+                        span { class: "inline-flex items-center gap-1.5 text-sm text-muted-foreground", icons::ShieldOff { class: "size-4" } {tr("Aus")} }
+                        button { class: btn(BTN_PRIMARY), disabled: busy(), onclick: start, icons::ShieldCheck {} {tr("2FA einrichten")} }
                     }
                 }
             }

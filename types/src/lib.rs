@@ -102,6 +102,15 @@
 //! | `DELETE /dieter/conversations/<id>` | → `204` | Admin |
 //! | `POST /dieter/watch` | → [`DieterStatus`] (Überwachung jetzt prüfen) | Admin |
 //! | `POST /dieter/claude/install` | → [`DieterStatus`] (Claude CLI laden/aktualisieren) | Admin |
+//! | `GET /docker` | → [`DockerOverview`] (alle Container mit Namen, App, Image, Zustand, internen IPs, Ports; alle Netze mit Subnetz) | angemeldet |
+//! | `GET /docker/containers/<name>/logs?tail=` | → `Vec<String>` (letzte Log-Zeilen, höchstens 1000) | angemeldet |
+//! | `GET /docker/containers/<name>` | → Rohdaten von `docker inspect` (ohne Umgebungsvariablen) | angemeldet |
+//! | `GET /me/2fa` | → [`TwoFactorStatus`] | angemeldet |
+//! | `POST /me/2fa/setup` | → [`TwoFactorSetup`] (Geheimnis und QR-Code; erst mit enable aktiv) | angemeldet |
+//! | `POST /me/2fa/enable` | [`TwoFactorInput`] (code) → [`TwoFactorCodes`] | angemeldet |
+//! | `POST /me/2fa/disable` | [`TwoFactorInput`] (password, code) → `204` | angemeldet |
+//! | `POST /me/2fa/recovery` | [`TwoFactorInput`] (password, code) → [`TwoFactorCodes`] (neue Codes) | angemeldet |
+//! | `DELETE /admin/users/<id>/2fa` | → `204` (2FA eines Kontos zurücksetzen) | Admin |
 //! | `GET /spy` | → [`SpyStatus`] (laufender Scan, eigene Domains, letzte Berichte) | angemeldet |
 //! | `POST /spy/scan` | [`SpyScanInput`] → [`SpyStatus`] (Scan im Hintergrund; aktiv nur für eigene Domains) | Admin |
 //! | `GET /spy/report?domain=&at=` | → [`SpyReport`] (ein Bericht aus dem Verlauf) | angemeldet |
@@ -125,11 +134,13 @@ use serde::{Deserialize, Serialize};
 
 mod access;
 mod dieter;
+mod docker;
 mod spy;
 mod tls;
 mod tools;
 pub use access::*;
 pub use dieter::*;
+pub use docker::*;
 pub use spy::*;
 pub use tls::*;
 pub use tools::*;
@@ -197,6 +208,9 @@ pub struct User {
     pub created_at: i64,
     pub last_login_at: Option<i64>,
     pub preferences: Preferences,
+    /// Zwei-Faktor-Anmeldung eingeschaltet.
+    #[serde(default)]
+    pub totp_enabled: bool,
 }
 
 impl User {
@@ -230,6 +244,46 @@ pub struct AuthStatus {
 pub struct LoginInput {
     pub username: String,
     pub password: String,
+    /// Code aus der Authenticator-App oder ein Wiederherstellungscode (nur mit 2FA).
+    #[serde(default)]
+    pub code: String,
+}
+
+/// `GET /me/2fa`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TwoFactorStatus {
+    pub enabled: bool,
+    /// Noch unbenutzte Wiederherstellungscodes.
+    pub recovery_left: u32,
+}
+
+/// `POST /me/2fa/setup`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TwoFactorSetup {
+    /// Geheimnis (Base32) zum Abtippen.
+    pub secret: String,
+    /// `otpauth://totp/…` für die App.
+    pub uri: String,
+    /// QR-Code als SVG.
+    pub qr_svg: String,
+}
+
+/// `POST /me/2fa/enable` | `disable` | `recovery`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TwoFactorInput {
+    pub code: String,
+    /// Für Abschalten und neue Codes.
+    pub password: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TwoFactorCodes {
+    /// Nur dieses eine Mal sichtbar.
+    pub recovery_codes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -52,6 +52,8 @@ pub struct Config {
     /// Dieter: Chat-API von OpenRouter bzw. xAI (`NRZDNS_DIETER_OPENROUTER_URL`, …).
     pub dieter_openrouter_url: String,
     pub dieter_xai_url: String,
+    /// Docker-Socket (`NRZDNS_DOCKER_SOCKET`), nur lesend benutzt.
+    pub docker_socket: PathBuf,
     /// GitHub-API für Updates der Komponenten (`NRZDNS_GITHUB_API`).
     pub github_api: String,
     /// Spy: DNS über HTTPS (JSON) für den Blick von aussen.
@@ -90,6 +92,7 @@ impl Default for Config {
             cloudflare_api: "https://api.cloudflare.com/client/v4".into(),
             acme_dns_check: true,
             github_api: "https://api.github.com".into(),
+            docker_socket: PathBuf::from("/var/run/docker.sock"),
             dieter_openrouter_url: "https://openrouter.ai/api/v1/chat/completions".into(),
             dieter_xai_url: "https://api.x.ai/v1/chat/completions".into(),
             spy_doh: "https://cloudflare-dns.com/dns-query".into(),

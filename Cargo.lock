@@ -1641,7 +1641,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns"
-version = "1.10.0"
+version = "1.11.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1657,6 +1657,7 @@ dependencies = [
  "jiff",
  "nrzdns-engine",
  "nrzdns-types",
+ "qrcode",
  "rand 0.8.8",
  "rcgen",
  "regex",
@@ -1688,7 +1689,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns-engine"
-version = "1.10.0"
+version = "1.11.0"
 dependencies = [
  "flate2",
  "hickory-proto",
@@ -1705,7 +1706,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns-types"
-version = "1.10.0"
+version = "1.11.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1958,6 +1959,12 @@ dependencies = [
  "version_check",
  "yansi",
 ]
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quinn"

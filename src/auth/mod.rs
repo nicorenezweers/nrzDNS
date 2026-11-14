@@ -5,5 +5,6 @@ pub mod guards;
 pub mod password;
 pub mod session;
 pub mod throttle;
+pub mod totp;
 
 pub use guards::{AdminUser, CurrentUser};

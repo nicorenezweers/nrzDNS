@@ -84,7 +84,19 @@ async fn login(
 ) -> AppResult<Json<User>> {
     throttle.check(&body.username, &ip.0)?;
     match users::authenticate(pool, &body.username, &body.password).await {
+        Ok(user) if user.totp_enabled && body.code.trim().is_empty() => {
+            // Passwort stimmt – jetzt der zweite Faktor (zählt nicht als Fehlversuch)
+            let _ = user;
+            Err(AppError::TotpRequired)
+        }
         Ok(user) => {
+            if user.totp_enabled {
+                if let Err(e) = users::verify_second_factor(pool, user.id, &body.code).await {
+                    throttle.failed(&body.username, &ip.0);
+                    tracing::warn!(user = %user.username, ip = %ip.0, "Zwei-Faktor-Code falsch");
+                    return Err(e);
+                }
+            }
             throttle.succeeded(&body.username, &ip.0);
             let token = session::create(pool, user.id, &ua.0).await?;
             session::set_cookie(cookies, token, config.cookie_secure);

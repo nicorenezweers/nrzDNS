@@ -22,6 +22,11 @@ pub enum AppError {
     /// Absichtlich ungenau: verrät nicht, ob es den Benutzernamen gibt.
     #[error("Benutzername oder Passwort falsch.")]
     InvalidCredentials,
+    /// Passwort stimmt, aber der zweite Faktor fehlt (Code `totp_required`).
+    #[error("Bitte den Code aus deiner Authenticator-App eingeben.")]
+    TotpRequired,
+    #[error("Der Code stimmt nicht.")]
+    TotpInvalid,
     #[error("{0}")]
     Forbidden(String),
     #[error("Nicht gefunden.")]
@@ -51,7 +56,10 @@ impl AppError {
     pub fn status(&self) -> Status {
         match self {
             AppError::BadRequest(_) => Status::BadRequest,
-            AppError::Unauthorized | AppError::InvalidCredentials => Status::Unauthorized,
+            AppError::Unauthorized
+            | AppError::InvalidCredentials
+            | AppError::TotpRequired
+            | AppError::TotpInvalid => Status::Unauthorized,
             AppError::Forbidden(_) => Status::Forbidden,
             AppError::NotFound => Status::NotFound,
             AppError::Conflict(_) => Status::Conflict,
@@ -155,6 +163,14 @@ impl<'r> Responder<'r, 'static> for AppError {
         let status = self.status();
         if status.code >= 500 && !matches!(self, AppError::BadGateway(_)) {
             tracing::error!(path = %req.uri(), "{self}");
+        }
+        if matches!(self, AppError::TotpRequired) {
+            let body = serde_json::json!({ "error": { "code": "totp_required", "message": self.public_message() } }).to_string();
+            return Response::build()
+                .status(status)
+                .header(ContentType::JSON)
+                .sized_body(body.len(), std::io::Cursor::new(body))
+                .ok();
         }
         error_response(req, status, &self.public_message())
     }

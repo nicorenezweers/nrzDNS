@@ -4,7 +4,7 @@
 # systemd-resolved mit DNSStubListener auf 0.0.0.0:53).
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.10.0
+    image: ghcr.io/nicorenezweers/nrz-dns:1.11.0
     # Selbst bauen statt das fertige Image zu holen:
     # build: .
     container_name: nrzdns
@@ -32,6 +32,9 @@ services:
     volumes:
       # nrzdns.db: Konten, Einstellungen, Zonen, Sperrlisten, Abfrageprotokoll – alles in einer Datei
       - nrzdns-data:/data
+      # Docker-Seite (alle Container, interne IPs, Logs – nur lesend); der Benutzer im
+      # Container braucht dafür Leserechte auf den Socket (z. B. group_add mit der docker-GID):
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
     # Das Image läuft als Benutzer 1000. Port 53 darf er dank dieser Einstellung öffnen
     # (Docker setzt sie seit 20.10 ohnehin), ganz ohne zusätzliche Rechte.
     sysctls:
