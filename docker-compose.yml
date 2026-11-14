@@ -4,7 +4,7 @@
 # systemd-resolved mit DNSStubListener auf 0.0.0.0:53).
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.1.0
+    image: ghcr.io/nicorenezweers/nrz-dns:1.2.0
     # Selbst bauen statt das fertige Image zu holen:
     # build: .
     container_name: nrzdns
@@ -13,12 +13,16 @@ services:
       - "53:53/udp"
       - "53:53/tcp"
       - "8380:8380"
+      # Reverse Proxy (HTTP): music.nrz.ch → http://100.78.107.162:8350 usw.
+      - "80:80"
     environment:
       TZ: Europe/Zurich
       # Hinter HTTPS (Reverse Proxy) einschalten:
       NRZDNS_COOKIE_SECURE: "false"
       # DNS-Adressen im Container, durch Kommas getrennt:
       # NRZDNS_DNS_LISTEN: "0.0.0.0:53,[::]:53"
+      # Adressen des Reverse Proxys (leer = aus):
+      # NRZDNS_PROXY_LISTEN: "0.0.0.0:80"
     volumes:
       # nrzdns.db: Konten, Einstellungen, Zonen, Sperrlisten, Abfrageprotokoll – alles in einer Datei
       - nrzdns-data:/data

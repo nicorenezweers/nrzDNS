@@ -5,6 +5,7 @@
 mod blocklist_updater;
 mod close_database;
 mod dns_server;
+mod proxy_server;
 mod request_log;
 mod security;
 mod session_cleanup;
@@ -12,6 +13,7 @@ mod session_cleanup;
 pub use blocklist_updater::BlocklistUpdater;
 pub use close_database::CloseDatabase;
 pub use dns_server::{DnsServer, LogWriter};
+pub use proxy_server::ProxyServer;
 pub use request_log::RequestLog;
 pub use security::{SecurityHeaders, CSP};
 pub use session_cleanup::SessionCleanup;

@@ -2,7 +2,7 @@
 # nrzDNS – Multi-Stage-Build für amd64 und arm64: Oberfläche (Dioxus/WebAssembly), DNS-Engine
 # und Server (Rust) in einer Datei. Braucht nur Docker – kein Rust auf dem Rechner.
 #   docker build -t nrzdns .
-#   docker run -p 53:53/udp -p 53:53/tcp -p 8380:8380 -v nrzdns-data:/data nrzdns
+#   docker run -p 53:53/udp -p 53:53/tcp -p 8380:8380 -p 80:80 -v nrzdns-data:/data nrzdns
 # Beide Architekturen (Rust wird quer-kompiliert, nicht emuliert):
 #   docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:<version> --push .
 # Nur das Programm für beide Architekturen (landet in dist/linux_<arch>/nrzdns):
@@ -97,7 +97,7 @@ ENV NRZDNS_CONFIG=/app/Rocket.toml \
     NRZDNS_DNS_LISTEN=0.0.0.0:53
 USER 1000:1000
 VOLUME /data
-EXPOSE 8380 53/udp 53/tcp
+EXPOSE 8380 53/udp 53/tcp 80
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["nrzdns", "healthcheck"]
 STOPSIGNAL SIGTERM

@@ -66,6 +66,11 @@
 //! | `PUT /settings/mcp` | [`McpSettingsInput`] → [`McpStatus`] | Admin |
 //! | `POST /settings/mcp/token` | → [`McpToken`] (neues Token, nur jetzt im Klartext; das alte gilt nicht mehr) | Admin |
 //! | `DELETE /settings/mcp/token` | → [`McpStatus`] (MCP aus) | Admin |
+//! | `GET /proxy` | → [`ProxyStatus`] (Reverse Proxy: Einträge, Ports, Adresse) | angemeldet |
+//! | `PUT /proxy/settings` | [`ProxySettings`] → [`ProxyStatus`] | Admin |
+//! | `POST /proxy/hosts` | [`ProxyHostInput`] → [`ProxyHost`] | Admin |
+//! | `PUT /proxy/hosts/<id>` | [`ProxyHostInput`] → [`ProxyHost`] | Admin |
+//! | `DELETE /proxy/hosts/<id>` | → `204` | Admin |
 //!
 //! **MCP-Server** (Model Context Protocol, Streamable HTTP, JSON-RPC 2.0) unter `POST /mcp`, mit
 //! `Authorization: Bearer <Token>` – für nrzDashboard und andere MCP-Clients: Übersicht,
@@ -1312,6 +1317,71 @@ pub fn normalize_domain(input: &str) -> Option<String> {
             && !label.ends_with('-')
     });
     ok.then_some(d)
+}
+
+// ------------------------------------------------------------------ Reverse Proxy
+
+/// Ein Name, den der eingebaute Reverse Proxy (HTTP) an ein Ziel weiterreicht, z. B.
+/// `music.nrz.ch` → `http://100.78.107.162:8350`. nrzDNS beantwortet den Namen selbst mit
+/// der Adresse des Proxys (A bzw. AAAA), damit Geräte, die nrzDNS fragen, beim Proxy landen.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyHost {
+    pub id: i64,
+    /// Name wie `music.nrz.ch` (klein, ohne Punkt am Ende).
+    pub host: String,
+    /// Ziel wie `http://100.78.107.162:8350` (nur HTTP), optional mit Pfad.
+    pub target: String,
+    pub enabled: bool,
+    pub comment: String,
+    /// Adresse, mit der nrzDNS den Namen beantwortet (leer = keine DNS-Antwort möglich).
+    pub dns_address: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProxyHostInput {
+    pub host: String,
+    /// `http://adresse:port[/pfad]`; ohne `http://` wird es ergänzt.
+    pub target: String,
+    pub enabled: bool,
+    pub comment: String,
+}
+
+impl Default for ProxyHostInput {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            target: String::new(),
+            enabled: true,
+            comment: String::new(),
+        }
+    }
+}
+
+/// Einstellungen des Reverse Proxys.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProxySettings {
+    /// IP-Adresse des Geräts, auf dem nrzDNS läuft – damit beantwortet nrzDNS die Namen
+    /// der Proxy-Einträge. Leer = die Adresse aus dem Ziel (wenn dort eine IP steht).
+    pub address: String,
+}
+
+/// `GET /proxy`
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProxyStatus {
+    /// Adressen, auf denen der Proxy HTTP annimmt (`NRZDNS_PROXY_LISTEN`), z. B. `0.0.0.0:80`.
+    pub listen: Vec<String>,
+    /// Port, den Browser nach dem Namen brauchen (80 = keiner, sonst `http://name:port`).
+    pub port: u16,
+    /// Adressen, die nicht geöffnet werden konnten, mit Grund.
+    pub listen_errors: Vec<String>,
+    pub settings: ProxySettings,
+    pub hosts: Vec<ProxyHost>,
 }
 
 #[cfg(test)]

@@ -8,6 +8,7 @@ mod cache;
 mod logs;
 mod mcp;
 mod me;
+mod proxy;
 mod settings;
 mod zones;
 
@@ -26,6 +27,7 @@ pub fn routes() -> Vec<Route> {
     r.extend(logs::routes());
     r.extend(mcp::routes());
     r.extend(me::routes());
+    r.extend(proxy::routes());
     r.extend(settings::routes());
     r.extend(zones::routes());
     r

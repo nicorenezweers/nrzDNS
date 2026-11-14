@@ -516,7 +516,7 @@ pub fn zone_name(input: &str) -> AppResult<String> {
     })
 }
 
-fn validate_comment(input: &str) -> AppResult<String> {
+pub(crate) fn validate_comment(input: &str) -> AppResult<String> {
     let c = input.trim();
     if c.chars().count() > MAX_COMMENT || c.chars().any(char::is_control) {
         return Err(AppError::bad(format!(

@@ -6,6 +6,7 @@ pub mod dashboard;
 pub mod layout;
 pub mod logs;
 pub mod not_found;
+pub mod proxy;
 pub mod resolve;
 pub mod settings;
 pub mod zone;

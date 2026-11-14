@@ -3,14 +3,23 @@
 
 use crate::config::Config;
 use crate::error::AppResult;
-use crate::services::{blocking, domains, settings, zones};
+use crate::proxy::ProxyState;
+use crate::services::{blocking, domains, proxy, settings, zones};
 use nrzdns_engine::Engine;
 use sqlx::SqlitePool;
 
-/// Alle Zonen mit ihren Einträgen.
+/// Alle Zonen mit ihren Einträgen, dazu die DNS-Antworten der Reverse-Proxy-Einträge.
 pub async fn push_zones(pool: &SqlitePool, engine: &Engine) -> AppResult<()> {
-    engine.set_zones(zones::all_details(pool).await?);
+    let mut all = zones::all_details(pool).await?;
+    proxy::merge_zones(&mut all, &proxy::list(pool).await?);
+    engine.set_zones(all);
     Ok(())
+}
+
+/// Reverse Proxy: Ziele an den Proxy, DNS-Antworten an die Engine.
+pub async fn push_proxy(pool: &SqlitePool, engine: &Engine, state: &ProxyState) -> AppResult<()> {
+    state.set_routes(proxy::routes(pool).await?);
+    push_zones(pool, engine).await
 }
 
 /// Eigene Sperren bzw. Ausnahmen.

@@ -22,6 +22,10 @@ pub struct Config {
     /// Leer = kein DNS-Server (nur DoH und Oberfläche).
     #[serde(deserialize_with = "listen_addrs")]
     pub dns_listen: Vec<SocketAddr>,
+    /// Adressen für den Reverse Proxy (HTTP), z. B. `NRZDNS_PROXY_LISTEN=0.0.0.0:80`; ohne
+    /// Port gilt 80. Leer = kein Proxy.
+    #[serde(deserialize_with = "proxy_addrs")]
+    pub proxy_listen: Vec<SocketAddr>,
     /// Neue Benutzer dürfen sich selbst registrieren, solange der Admin nichts anderes
     /// einstellt (das erste Konto immer).
     pub registration_open: bool,
@@ -40,6 +44,7 @@ impl Default for Config {
         Self {
             data_dir: PathBuf::from("./data"),
             dns_listen: vec![SocketAddr::from(([0, 0, 0, 0], 53))],
+            proxy_listen: vec![SocketAddr::from(([0, 0, 0, 0], 80))],
             registration_open: false,
             cookie_secure: false,
             background: true,
@@ -69,15 +74,34 @@ impl Config {
 
 /// Eine Adresse wie `0.0.0.0:53`, `[::]:53` oder nur `127.0.0.1` (Port 53).
 pub fn parse_listen(s: &str) -> Option<SocketAddr> {
+    parse_listen_port(s, 53)
+}
+
+/// Wie [`parse_listen`], ohne Port gilt `port`.
+pub fn parse_listen_port(s: &str, port: u16) -> Option<SocketAddr> {
     let s = s.trim();
     s.parse::<SocketAddr>().ok().or_else(|| {
         let ip = s.trim_start_matches('[').trim_end_matches(']');
-        ip.parse::<IpAddr>().ok().map(|ip| SocketAddr::new(ip, 53))
+        ip.parse::<IpAddr>()
+            .ok()
+            .map(|ip| SocketAddr::new(ip, port))
     })
 }
 
-/// `dns_listen` als Liste oder als Zeichenkette mit Kommas (so kommt sie aus der Umgebung).
 fn listen_addrs<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SocketAddr>, D::Error> {
+    addrs(d, "dns_listen", 53)
+}
+
+fn proxy_addrs<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SocketAddr>, D::Error> {
+    addrs(d, "proxy_listen", 80)
+}
+
+/// Adressen als Liste oder als Zeichenkette mit Kommas (so kommen sie aus der Umgebung).
+fn addrs<'de, D: Deserializer<'de>>(
+    d: D,
+    key: &str,
+    port: u16,
+) -> Result<Vec<SocketAddr>, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum Raw {
@@ -92,9 +116,8 @@ fn listen_addrs<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SocketAddr>, D::E
         .iter()
         .filter(|s| !s.trim().is_empty())
         .map(|s| {
-            parse_listen(s).ok_or_else(|| {
-                serde::de::Error::custom(format!("dns_listen: ungültige Adresse „{s}“"))
-            })
+            parse_listen_port(s, port)
+                .ok_or_else(|| serde::de::Error::custom(format!("{key}: ungültige Adresse „{s}“")))
         })
         .collect()
 }
@@ -146,6 +169,16 @@ mod tests {
         );
         assert!(listen(base().merge(("dns_listen", ""))).is_empty());
         assert!(listen(base().merge(("dns_listen", Vec::<String>::new()))).is_empty());
+        let proxy = |f: Figment| -> Vec<String> {
+            let c: Config = f.extract().unwrap();
+            c.proxy_listen.iter().map(ToString::to_string).collect()
+        };
+        assert_eq!(proxy(base()), ["0.0.0.0:80"]);
+        assert_eq!(
+            proxy(base().merge(("proxy_listen", "0.0.0.0:8480,[::]"))),
+            ["0.0.0.0:8480", "[::]:80"]
+        );
+        assert!(proxy(base().merge(("proxy_listen", ""))).is_empty());
         assert!(base()
             .merge(("dns_listen", "kein-host:53"))
             .extract::<Config>()

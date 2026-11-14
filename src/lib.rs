@@ -9,6 +9,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod fairings;
+pub mod proxy;
 pub mod routes;
 pub mod services;
 
@@ -49,12 +50,15 @@ pub async fn build_with(figment: Figment) -> Result<Rocket<Build>, error::AppErr
 
     let dns = services::settings::dns(&pool).await?;
     let (engine, log) = Engine::new(dns, VERSION);
+    let proxy = proxy::ProxyState::default();
     services::sync::load_all(&pool, &engine, &config).await?;
+    proxy.set_routes(services::proxy::routes(&pool).await?);
 
     Ok(rocket::custom(figment)
         .manage(pool)
         .manage(engine)
         .manage(config)
+        .manage(proxy)
         .manage(auth::throttle::LoginThrottle::default())
         .manage(services::blocking::Updater::default())
         .manage(fairings::LogWriter::default())
@@ -65,6 +69,7 @@ pub async fn build_with(figment: Figment) -> Result<Rocket<Build>, error::AppErr
         .attach(rocket::shield::Shield::new())
         .attach(fairings::SecurityHeaders)
         .attach(fairings::DnsServer::new(log))
+        .attach(fairings::ProxyServer)
         .attach(fairings::BlocklistUpdater)
         .attach(fairings::SessionCleanup)
         .attach(fairings::CloseDatabase)

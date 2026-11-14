@@ -1464,13 +1464,14 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "nrzdns"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
  "flate2",
  "futures",
  "hex",
+ "hyper 0.14.32",
  "nrzdns-engine",
  "nrzdns-types",
  "rand 0.8.8",
@@ -1492,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns-engine"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "flate2",
  "hickory-proto",
@@ -1509,7 +1510,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns-types"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "serde",
  "serde_json",

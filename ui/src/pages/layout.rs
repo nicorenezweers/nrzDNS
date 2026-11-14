@@ -126,6 +126,7 @@ fn Sidebar() -> Element {
             NavItem { to: Route::Blocking {}, label: tr("Sperren"), active: matches!(route, Route::Blocking {}), icon: rsx! { icons::ShieldBan {} } }
             NavItem { to: Route::Allowed {}, label: tr("Ausnahmen"), active: matches!(route, Route::Allowed {}), icon: rsx! { icons::ShieldCheck {} } }
             NavItem { to: Route::logs(), label: tr("Abfragen"), active: matches!(route, Route::Logs { .. }), icon: rsx! { icons::ScrollText {} } }
+            NavItem { to: Route::Proxy {}, label: tr("Reverse Proxy"), active: matches!(route, Route::Proxy {}), icon: rsx! { icons::Waypoints {} } }
             NavItem { to: Route::Cache {}, label: tr("Cache"), active: matches!(route, Route::Cache {}), icon: rsx! { icons::Database {} } }
             NavItem { to: Route::Resolve { name: None, qtype: None }, label: tr("DNS-Client"), active: matches!(route, Route::Resolve { .. }), icon: rsx! { icons::Terminal {} } }
             div { class: "my-2 h-px bg-sidenav-border" }

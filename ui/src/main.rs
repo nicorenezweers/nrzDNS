@@ -21,6 +21,7 @@ use pages::dashboard::Dashboard;
 use pages::layout::AppLayout;
 use pages::logs::Logs;
 use pages::not_found::NotFound;
+use pages::proxy::Proxy;
 use pages::resolve::Resolve;
 use pages::settings::Settings;
 use pages::zone::ZoneView;
@@ -64,6 +65,8 @@ pub enum Route {
         },
         #[route("/cache")]
         Cache {},
+        #[route("/proxy")]
+        Proxy {},
         #[route("/resolve?:name&:qtype")]
         Resolve { name: Option<String>, qtype: Option<String> },
         #[redirect("/settings", || Route::Settings { section: "general".into() })]
