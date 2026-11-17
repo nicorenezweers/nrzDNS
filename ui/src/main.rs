@@ -9,6 +9,7 @@ mod json;
 mod labels;
 mod pages;
 mod state;
+mod streamer;
 mod ui;
 mod util;
 
@@ -21,10 +22,10 @@ use pages::cache::Cache;
 use pages::dashboard::Dashboard;
 use pages::devices::Devices;
 use pages::docker::Docker;
-use pages::map::NetworkMapPage as Map;
 use pages::domains::Domains;
 use pages::layout::AppLayout;
 use pages::logs::Logs;
+use pages::map::NetworkMapPage as Map;
 use pages::monitor::Monitor;
 use pages::netbird::Netbird;
 use pages::not_found::NotFound;
@@ -130,6 +131,8 @@ impl Route {
 }
 
 fn main() {
+    // Vor dem ersten Rendern, damit im Streamer-Modus nichts ungeschwärzt aufblitzt
+    streamer::init();
     dioxus::launch(App);
 }
 

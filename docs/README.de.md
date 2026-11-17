@@ -54,15 +54,15 @@ Du brauchst Docker. Das Image enthält Programm und Oberfläche.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.13.0
+  ghcr.io/nicorenezweers/nrz-dns:1.13.1
 ```
 
-Das Image ist für mehrere Architekturen gebaut (`linux/amd64`, `linux/arm64`) und erscheint mit jedem [Release](https://github.com/nicorenezweers/nrzDNS/releases). Selbst bauen:
+Das Image ist für mehrere Architekturen gebaut (`linux/amd64`, `linux/arm64`) und erscheint mit jedem [Release](https://github.com/nicorenezweers/nrzDNS/releases). Selbst bauen (Docker mit buildx und `cargo`, das nur das Dockerfile erzeugt – übersetzt wird alles in Docker):
 
 ```bash
 git clone https://github.com/nicorenezweers/nrzDNS.git
 cd nrzNetwork
-docker build -t nrzdns .
+cargo xtask docker -t nrzdns
 ```
 
 <http://localhost:8380> öffnen. Das erste Konto, das du anlegst, wird Administrator. Danach ist die Registrierung geschlossen, bis du sie in den Einstellungen öffnest; dort legst du auch Konten für andere an.
@@ -74,7 +74,7 @@ docker build -t nrzdns .
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.13.0   # oder: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.13.1   # oder: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -108,10 +108,10 @@ Der Container läuft als Benutzer `1000` ohne zusätzliche Rechte. Docker (ab 20
 Jedes [Release](https://github.com/nicorenezweers/nrzDNS/releases) enthält das Programm für Linux (`amd64`, `arm64`) als einzelne Datei, dazu `SHA256SUMS`. Die Wurzelzertifikate für DoT, DoH und das Laden der Sperrlisten bringt es selbst mit.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.13.0/nrzdns-1.13.0-linux-amd64
-chmod +x nrzdns-1.13.0-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.13.0-linux-amd64   # Port 53 ohne root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.13.0-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.13.1/nrzdns-1.13.1-linux-amd64
+chmod +x nrzdns-1.13.1-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.13.1-linux-amd64   # Port 53 ohne root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.13.1-linux-amd64
 ```
 
 Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen lassen, z. B. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, und mit `dig @127.0.0.1 -p 5353 example.com` fragen.
@@ -119,10 +119,10 @@ Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen la
 ### Beide Architekturen
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.13.0 --push .
+cargo xtask docker --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.13.1 --push
 ```
 
-Rust wird quer-kompiliert, nicht emuliert – der arm64-Build ist auf einem x86-Rechner also schnell und umgekehrt. Nur das Programm, gzip-komprimiert je Architektur (für die Umbrel-App): `scripts/store-binaries.sh <ordner>`.
+Rust wird quer-kompiliert, nicht emuliert – der arm64-Build ist auf einem x86-Rechner also schnell und umgekehrt. Nur das Programm, gzip-komprimiert je Architektur (für die Umbrel-App): `cargo xtask store-binaries <ordner>`. Das Dockerfile als Datei (z. B. für `docker compose build`): `cargo xtask dockerfile > Dockerfile`.
 
 ## Erste Schritte
 
@@ -233,13 +233,15 @@ cargo clippy --workspace --all-targets -- -D warnings
 # Oberfläche mit Hot Reload (dx = dioxus-cli 0.7)
 rustup target add wasm32-unknown-unknown
 cargo install dioxus-cli --version 0.7.10 --locked
-cd ui && dx serve                 # http://localhost:8080, leitet /api und /static an :8380 weiter
+cargo xtask serve                 # http://localhost:8080, leitet /api und /static an :8380 weiter
 
 # Oberfläche ins Programm einbetten
-scripts/ui.sh && cargo build --release
+cargo xtask ui && cargo build --release
 ```
 
-Der Workspace hat drei Crates: `nrzdns` (der Rocket-Server, `src/`), `nrzdns-engine` (der DNS-Server selbst, `engine/`) und `nrzdns-types` (alle Typen der API, `types/`, auch von der Oberfläche benutzt). Die Oberfläche in `ui/` ist ein eigenes Projekt für `wasm32-unknown-unknown`. `scripts/ui.sh` baut sie nach `ui/dist/public`; `build.rs` bettet sie (gzip) zusammen mit `locales/` und `static/` ein. Ohne sie läuft der Server trotzdem und zeigt einen Hinweis statt der Oberfläche. Übersetzungen liegen in `locales/<sprache>.json` (deutscher Ausgangstext → Übersetzung).
+Der Workspace hat vier Crates: `nrzdns` (der Rocket-Server, `src/`), `nrzdns-engine` (der DNS-Server selbst, `engine/`), `nrzdns-types` (alle Typen der API, `types/`, auch von der Oberfläche benutzt) und `xtask` (Build-Aufgaben, `cargo xtask`). Die Oberfläche in `ui/` ist ein eigenes Projekt für `wasm32-unknown-unknown`. `cargo xtask ui` baut sie nach `ui/dist/public`; `build.rs` bettet sie (gzip) zusammen mit `locales/` und `static/` ein. Ohne sie läuft der Server trotzdem und zeigt einen Hinweis statt der Oberfläche. Übersetzungen liegen in `locales/<sprache>.json` (deutscher Ausgangstext → Übersetzung).
+
+Der Code ist zu 100 % Rust: Die Tailwind-Eingabe steht in `ui/tailwind.rs` (`cargo xtask` schreibt daraus `ui/tailwind.css`, bevor `dx` läuft), das Dockerfile in `xtask/src/docker.rs` und die Datenbank-Migrationen in `src/db/migrations.rs`; Build-Aufgaben sind `cargo xtask` statt Shell-Skripte.
 
 Die JSON-API liegt unter `/api/v1`; die Tabelle aller Endpunkte steht im Doc-Kommentar von [`types/src/lib.rs`](../types/src/lib.rs). Aufbau im Detail: [ARCHITECTURE.md](../ARCHITECTURE.md).
 

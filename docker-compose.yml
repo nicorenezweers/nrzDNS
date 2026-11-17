@@ -4,8 +4,8 @@
 # systemd-resolved mit DNSStubListener auf 0.0.0.0:53).
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.13.0
-    # Selbst bauen statt das fertige Image zu holen:
+    image: ghcr.io/nicorenezweers/nrz-dns:1.13.1
+    # Selbst bauen statt das fertige Image zu holen (vorher `cargo xtask dockerfile > Dockerfile`):
     # build: .
     container_name: nrzdns
     restart: unless-stopped

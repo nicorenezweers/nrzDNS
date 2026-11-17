@@ -12,17 +12,12 @@ pub static ME: GlobalSignal<Option<User>> = Signal::global(|| None);
 pub static SIDEBAR_OPEN: GlobalSignal<bool> = Signal::global(|| false);
 
 /// Streamer-Modus: sensible Angaben geschwärzt/unscharf (gespeichert im Browser).
-pub static STREAMER: GlobalSignal<bool> = Signal::global(|| {
-    web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|s| s.get_item("nrz-streamer").ok().flatten())
-        .is_some_and(|v| v == "1")
-});
+pub static STREAMER: GlobalSignal<bool> = Signal::global(crate::streamer::stored);
 
 /// Streamer-Modus ein- oder ausschalten.
 pub fn set_streamer(on: bool) {
     *STREAMER.write() = on;
-    document::eval(&format!("window.nrzStreamer && window.nrzStreamer.set({on})"));
+    crate::streamer::set(on);
     crate::components::overlay::toast(if on {
         crate::i18n::tr("Streamer-Modus an – sensible Angaben sind verborgen.")
     } else {

@@ -1,0 +1,12 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+edition = "2021"
+description = "Build-Aufgaben von nrzNetwork (cargo xtask …): Oberfläche, Dockerfile, Docker-Builds, Programme fürs Umbrel-Paket"
+license = "AGPL-3.0-or-later"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+# gzip für die Programme des Umbrel-Pakets (dieselbe Fassung wie build.rs)
+flate2 = "1"

@@ -38,7 +38,7 @@ nrzNetwork is one Rust program made of three crates. The **engine** (`engine/`, 
 |---|---|---|
 | Split | DNS in its own crate (`nrzdns-engine`) without Rocket or SQLite; the server hands it the complete state (`apply_settings`, `set_zones`, `set_block_list`, `set_custom_blocked`, `set_allowed`) after every change | The hot path never waits for the database or a lock held by a web request; the engine can be tested on its own with plain DNS messages |
 | Server | Rocket 0.5.1 | Typed request guards for sessions, admins and the origin check; fairings for security headers and background work; graceful shutdown on `SIGTERM` |
-| Storage | One SQLite file through **sqlx 0.9** (bundled SQLite, WAL, migrations embedded with `sqlx::migrate!`) | Backup = one file; no database server to run |
+| Storage | One SQLite file through **sqlx 0.9** (bundled SQLite, WAL, migrations as Rust constants in `src/db/migrations.rs`, checksums pinned by a test) | Backup = one file; no database server to run |
 | Settings | `DnsSettings` stored as one JSON document; fields missing in older documents get their defaults (`#[serde(default)]`); applied immediately | No restart after a change; settings can grow without migrations |
 | Query log | The engine sends one `QueryLogEntry` per answered query into a bounded channel (50 000 entries); the server writes them in batches. When the channel is full, new entries are dropped instead of slowing down DNS | Answering comes first; a slow disk can't make name resolution slow |
 | Forwarding | UDP with TCP fallback on truncation, TCP, DNS over TLS (RFC 7858), DNS over HTTPS (RFC 8484); strategies sequential, random, parallel; per-upstream timeout and health | Encrypted upstreams without a separate proxy; parallel trades bandwidth for latency |
@@ -55,14 +55,14 @@ nrzNetwork is one Rust program made of three crates. The **engine** (`engine/`, 
 | HTTPS for own domains | ACME (`instant-acme`, ring) with the DNS-01 challenge through the Cloudflare API: zone lookup, `_acme-challenge` TXT records (old ones removed first, new ones always deleted afterwards), wait until Cloudflare's authoritative name servers serve them (queried directly through the engine), finalize, store `tls/cert.pem` and `tls/key.pem` (0600). The TLS entry peeks at the ClientHello without consuming it: names covered by the certificate are terminated with rustls and handled like port 80 (`X-Forwarded-Proto: https`, set by the proxy, never taken from the client); everything else is spliced unchanged to `NRZDNS_TLS_FALLBACK`. Renewal hourly when less than a third of the lifetime is left, at most every 6 h after a failure. Tested end to end against Pebble | Trusted certificates in the LAN without opening any port; umbrelOS keeps its own HTTPS |
 | Port 80 on Umbrel | `hooks/pre-start` starts `hooks/nrznetwork-gateway` on the host: it writes the host addresses to `data/host-addresses`, and while `GET /.nrznetwork/health` answers it inserts an own iptables chain (`nat PREROUTING`, not for `lo`, `docker0`, `br-*`, `veth*`) that DNATs TCP 80 to the container's port 81; on failure, stop or `data/port80 = off` the chain is removed. Unknown names go to `NRZDNS_PROXY_FALLBACK` (umbrelOS) | umbrelOS owns port 80; this keeps its interface working while names work without a port |
 | DoH server | `GET`/`POST /dns-query` on the web port, no login, can be switched off; same pipeline as UDP/TCP | Encrypted DNS for browsers and phones behind an HTTPS reverse proxy |
-| Interface | **Dioxus 0.7** (Rust → WebAssembly) with components adapted from **rust-ui**, Tailwind via `dx`; built with `dx bundle` and embedded by `build.rs` (gzip) | One binary, no CDN, works offline; the UI talks only to `/api/v1` |
+| Interface | **Dioxus 0.7** (Rust → WebAssembly) with components adapted from **rust-ui**, Tailwind via `dx` (input in `ui/tailwind.rs`); built with `cargo xtask ui` (`dx bundle`) and embedded by `build.rs` (gzip), which also adds `lang` and a dark background to the default `index.html` of `dx` | One binary, no CDN, works offline; the UI talks only to `/api/v1` |
 | Shared types | `types/` (`nrzdns-types`): every request and response struct and the query log entry, used by server, engine and UI | The three parts can't drift apart; the endpoint table lives in its doc comment |
 | i18n | German source strings as keys, catalogs in `locales/<lang>.json` embedded by `build.rs`; server messages are German and translated on the client | Readable code; one place for all texts |
 | Packaging | One binary; Docker runtime stage without any `RUN`; the Umbrel app ships gzipped binaries in the store instead of an image | Multi-arch images without emulation; installable on Umbrel although the source repository is private |
 
 ## Data model
 
-The authoritative schema is in `migrations/`. Logically the database holds:
+The authoritative schema is in `src/db/migrations.rs`. Logically the database holds:
 
 - **users** (username, display name, Argon2id hash, role `admin`/`member`, disabled, preferences as JSON) and **sessions** (SHA-256 of the token, user, expiry)
 - **settings** (instance settings such as open registration, and `DnsSettings` as JSON)
@@ -100,14 +100,14 @@ Each answer becomes a `QueryLogEntry` (when the query log is on); the DNS client
 
 ## Build
 
-`Dockerfile` stages:
+Dockerfile stages (the Dockerfile is a Rust constant in `xtask/src/docker.rs`; `cargo xtask docker` pipes it into `docker buildx build`, `cargo xtask dockerfile` prints it):
 
-1. `ui`: installs `dioxus-cli` and builds the WebAssembly interface (`dx bundle --web --release`) once on the build machine
+1. `ui`: installs `dioxus-cli`, writes the Tailwind input (heredoc from `ui/tailwind.rs`) and builds the WebAssembly interface (`dx bundle --web --release`) once on the build machine
 2. `build`: Rust release build of the workspace, cross-compiled for amd64/arm64 (C dependencies with the target's compiler); embeds the interface, `locales/` and `static/`
 3. `binaries`: only the program (`/nrzdns`), exported for the release assets and the Umbrel app
 4. `runtime`: pinned `debian:trixie-slim`, only `COPY` steps, user `1000`, `/data` volume, ports `8380`, `53/udp`, `53/tcp`, health check (`nrzdns healthcheck`)
 
-`.github/workflows/release.yml` builds `binaries` and `runtime` for `linux/amd64` and `linux/arm64` when a release is published, attaches `nrzdns-<version>-linux-{amd64,arm64}` and `SHA256SUMS` to the release and pushes `ghcr.io/<owner>/nrz-dns:<version>` and `:latest`. `.github/workflows/ci.yml` runs `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test` for the workspace and checks the UI for `wasm32-unknown-unknown` on pushes to `main` and pull requests. `scripts/store-binaries.sh <folder>` builds both programs and stores them gzipped as `nrzdns-amd64.gz` and `nrzdns-arm64.gz` for the Umbrel app.
+`.github/workflows/release.yml` builds `binaries` and `runtime` for `linux/amd64` and `linux/arm64` when a release is published, attaches `nrzdns-<version>-linux-{amd64,arm64}` and `SHA256SUMS` to the release and pushes `ghcr.io/<owner>/nrz-dns:<version>` and `:latest`. `.github/workflows/ci.yml` runs `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test` for the workspace and checks the UI for `wasm32-unknown-unknown` on pushes to `main` and pull requests. `cargo xtask store-binaries <folder>` builds both programs and stores them gzipped as `nrzdns-amd64.gz` and `nrzdns-arm64.gz` for the Umbrel app.
 
 ## Tests
 

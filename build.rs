@@ -1,9 +1,8 @@
-// Migrationen sind ins Programm eingebettet (sqlx::migrate!) – bei Änderungen neu übersetzen.
-//
-// Die Oberfläche (Dioxus, `ui/`) wird mit `scripts/ui.sh` nach `ui/dist/public` gebaut und hier
+// Die Oberfläche (Dioxus, `ui/`) wird mit `cargo xtask ui` nach `ui/dist/public` gebaut und hier
 // ins Programm eingebettet: Für jede Datei entsteht ein Eintrag in `$OUT_DIR/spa.rs`, Text und
 // WebAssembly zusätzlich gzip-komprimiert. Fehlt der Ordner, bleibt die Liste leer und der Server
-// zeigt einen Hinweis statt der Oberfläche.
+// zeigt einen Hinweis statt der Oberfläche. `index.html` stammt aus der Standardvorlage von `dx`
+// und bekommt hier Sprache und dunklen Hintergrund (siehe `index_html`).
 //
 // Ebenso eingebettet: die Übersetzungen (`locales/<sprache>.json` → `$OUT_DIR/locales.rs`) und
 // Schrift und Icons aus `static/` (→ `$OUT_DIR/static_files.rs`). Es landet nur, was beim
@@ -12,14 +11,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Dateien aus `static/` mit diesen Endungen kommen ins Programm.
-const STATIC_EXTENSIONS: &[&str] = &["woff2", "woff", "png", "svg", "ico", "webp", "js"];
+const STATIC_EXTENSIONS: &[&str] = &["woff2", "woff", "png", "svg", "ico", "webp"];
 /// Grössere Dateien in `static/` bleiben draussen (Screenshots o. ä. gehören nicht ins Programm).
 const STATIC_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    println!("cargo:rerun-if-changed=migrations");
     println!("cargo:rerun-if-changed=ui/dist/public");
     println!("cargo:rerun-if-changed=locales");
     println!("cargo:rerun-if-changed=static");
@@ -33,8 +31,14 @@ fn main() {
     files.sort();
     let mut code = String::from("pub static FILES: &[SpaFile] = &[\n");
     for (i, rel) in files.iter().enumerate() {
-        let src = root.join(rel);
+        let mut src = root.join(rel);
         println!("cargo:rerun-if-changed={}", src.display());
+        if rel == "index.html" {
+            let html =
+                std::fs::read_to_string(&src).unwrap_or_else(|e| panic!("{}: {e}", src.display()));
+            src = out.join("index.html");
+            write(&src, &index_html(&html));
+        }
         let gz = gzip_include(&out, &format!("spa-{i}.gz"), &src, rel);
         code += &format!(
             "    SpaFile {{ path: {rel:?}, body: include_bytes!({:?}), gzip: {gz} }},\n",
@@ -102,6 +106,20 @@ fn main() {
     }
     code += "];\n";
     write(&out.join("static_files.rs"), &code);
+}
+
+/// `index.html` von `dx` (Standardvorlage, eine eigene gibt es nicht) um die Sprache und einen
+/// dunklen Hintergrund ergänzen, der schon vor WebAssembly und CSS gilt – kein weisses Aufblitzen.
+fn index_html(html: &str) -> String {
+    let mut html = html.replacen("<html>", "<html lang=\"de\">", 1);
+    match html.find("</head") {
+        Some(pos) => html.insert_str(
+            pos,
+            "<style>html, body { background: #121212; color-scheme: dark; }</style>\n",
+        ),
+        None => println!("cargo:warning=ui/dist/public/index.html ohne </head>"),
+    }
+    html
 }
 
 /// Für komprimierbare Dateien eine gzip-Fassung in `OUT_DIR` schreiben und den passenden

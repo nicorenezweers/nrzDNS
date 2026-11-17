@@ -1641,7 +1641,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns"
-version = "1.13.0"
+version = "1.13.1"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1689,7 +1689,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns-engine"
-version = "1.13.0"
+version = "1.13.1"
 dependencies = [
  "flate2",
  "hickory-proto",
@@ -1706,7 +1706,7 @@ dependencies = [
 
 [[package]]
 name = "nrzdns-types"
-version = "1.13.0"
+version = "1.13.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3718,6 +3718,13 @@ checksum = "963d6fab92d5504b971dc8bd90ca743c2575e590bc8071ea5bc571598667ae08"
 dependencies = [
  "libc",
  "rustix",
+]
+
+[[package]]
+name = "xtask"
+version = "0.0.0"
+dependencies = [
+ "flate2",
 ]
 
 [[package]]

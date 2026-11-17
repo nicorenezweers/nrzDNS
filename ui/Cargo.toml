@@ -1,6 +1,6 @@
 [package]
 name = "nrzdns-ui"
-version = "1.13.0"
+version = "1.13.1"
 edition = "2024"
 description = "Oberfläche von nrzDNS – Dioxus 0.7 (WebAssembly) mit Komponenten von rust-ui"
 license = "MIT"
@@ -25,6 +25,9 @@ js-sys = "0.3"
 web-sys = { version = "0.3", features = [
   "Blob", "Element", "Event", "EventTarget", "File", "FileList", "HtmlElement", "HtmlInputElement", "Location",
   "Storage", "Window", "Document", "Navigator",
+  # Streamer-Modus (src/streamer.rs)
+  "DomTokenList", "MutationObserver", "MutationObserverInit", "MutationRecord", "Node", "NodeList", "Range",
+  "TreeWalker",
 ] }
 urlencoding = "2"
 futures-channel = "0.3"

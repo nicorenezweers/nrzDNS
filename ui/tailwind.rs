@@ -1,4 +1,12 @@
-/* nrzDNS – Oberfläche auf Basis von rust-ui (https://github.com/rust-ui/ui, MIT).
+//! Tailwind-Eingabe der Oberfläche (Tailwind v4 über `dx`, dunkles Theme von rust-ui).
+//!
+//! Gehört nicht zum Modulbaum der Oberfläche: `cargo xtask ui` und `cargo xtask serve` schreiben
+//! daraus `ui/tailwind.css` (nicht im Repository), bevor `dx` sie mit der Tailwind-CLI nach
+//! `assets/tailwind.css` übersetzt; das Dockerfile (`cargo xtask dockerfile`) bringt sie als
+//! Heredoc mit. Übersetzt wird diese Datei als Modul von `xtask`.
+
+/// Inhalt von `ui/tailwind.css`.
+pub const INPUT: &str = r#"/* nrzDNS – Oberfläche auf Basis von rust-ui (https://github.com/rust-ui/ui, MIT).
    Nur Grautöne: das dunkle Theme von rust-ui, Akzente grau statt blau (wie nrzPaper). */
 @import "tailwindcss";
 
@@ -110,7 +118,7 @@
 }
 .flow-line { animation: flow 1.1s linear infinite; }
 
-/* Streamer-Modus (siehe index.html) */
+/* Streamer-Modus (siehe src/streamer.rs) */
 ::highlight(nrz-redact) { color: transparent; background-color: oklch(0.55 0 0); }
 html.streamer .sensitive,
 html.streamer .font-mono,
@@ -156,3 +164,4 @@ html.streamer code { filter: blur(6px); }
      erscheinen; Klicks gehen ohnehin an den Knopf bzw. Link darum herum. */
   svg[data-name] { pointer-events: none; }
 }
+"#;

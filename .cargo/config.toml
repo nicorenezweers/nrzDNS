@@ -1,0 +1,4 @@
+# Build-Aufgaben in Rust (statt Shell-Skripten): cargo xtask ui | serve | dockerfile | docker |
+# store-binaries – siehe xtask/src/main.rs.
+[alias]
+xtask = "run --package xtask --"

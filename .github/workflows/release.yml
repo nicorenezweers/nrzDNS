@@ -40,6 +40,11 @@ jobs:
           echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nrz-dns" >> "$GITHUB_OUTPUT"
           echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # The Dockerfile is a Rust constant (xtask/src/docker.rs, Tailwind input included as a
+      # heredoc); the runner's preinstalled Rust only generates it, everything else runs in Docker.
+      - name: Dockerfile
+        run: cargo xtask dockerfile > Dockerfile
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3

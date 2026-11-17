@@ -1950,14 +1950,14 @@ dependencies = [
 
 [[package]]
 name = "nrzdns-types"
-version = "1.13.0"
+version = "1.13.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "nrzdns-ui"
-version = "1.13.0"
+version = "1.13.1"
 dependencies = [
  "dioxus",
  "futures-channel",

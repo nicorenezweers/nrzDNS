@@ -1,3 +1,5 @@
 target
 assets/tailwind.css
 dist
+# Tailwind-Eingabe – entsteht aus tailwind.rs (cargo xtask ui | serve)
+/tailwind.css
