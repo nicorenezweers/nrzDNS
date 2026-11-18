@@ -1,0 +1,9 @@
+/target
+/data
+.DS_Store
+*.db
+*.db-*
+/.tools
+/dist*
+# Entsteht aus xtask/src/docker.rs (cargo xtask dockerfile > Dockerfile)
+/Dockerfile

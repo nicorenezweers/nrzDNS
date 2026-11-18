@@ -1,0 +1,99 @@
+[package]
+name = "nrzdns"
+version = "1.0.0"
+edition = "2021"
+description = "nrzNetwork – selbst gehosteter DNS-Server wie Technitium, in Rust (Rocket, SQLite, Dioxus)"
+license = "AGPL-3.0-or-later"
+rust-version = "1.85"
+publish = false
+
+# Server, Engine, Typen und die Build-Aufgaben (xtask/, `cargo xtask …`) sind ein Workspace; die
+# Oberfläche (ui/) ist ein eigenes Projekt (WebAssembly) und wird mit `cargo xtask ui` gebaut.
+[workspace]
+members = [".", "engine", "types", "xtask"]
+exclude = ["ui"]
+
+[dependencies]
+# Gemeinsame Typen der JSON-API (auch von Engine und Oberfläche benutzt)
+nrzdns-types = { path = "types" }
+# Der DNS-Server selbst (UDP/TCP, Zonen, Weiterleitung, Cache, Sperrlisten)
+nrzdns-engine = { path = "engine" }
+
+# Web
+rocket = { version = "=0.5.1", features = ["secrets", "json"] }
+# Rocket 0.5.1 verlangt nur "^0.5.1" für diese beiden – ohne feste Version zieht
+# Cargo 0.5.2 (hyper 1.x), und Rocket 0.5.1 lässt sich nicht mehr übersetzen.
+rocket_http = "=0.5.1"
+rocket_codegen = "=0.5.1"
+
+# Datenbank: eine SQLite-Datei (Konten, Einstellungen, Zonen, Listen, Abfrageprotokoll)
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate", "json"] }
+
+# Reverse Proxy (HTTP/1.1, dieselbe hyper-Fassung wie Rocket)
+hyper = { version = "0.14", features = ["server", "client", "http1", "tcp", "runtime"] }
+
+# Netzwerk-Tools: ICMP über Datagramm-Sockets, HTTP-Check (dieselben Fassungen wie die Engine)
+socket2 = { version = "0.6", features = ["all"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "gzip", "http2", "json"] }
+
+# HTTPS für eigene Domains: Let's Encrypt (ACME, DNS-Prüfung über Cloudflare), TLS im Proxy
+instant-acme = { version = "0.8", default-features = false, features = ["ring", "hyper-rustls", "rcgen", "time", "x509-parser"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+x509-parser = "0.18"
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "logging", "std"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+rustls-pemfile = "2"
+# Eigener HTTP-Client für ACME mit eingebauten Stammzertifikaten (im Container gibt es keine)
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "http2", "ring", "tls12"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "http2", "tokio"] }
+bytes = "1"
+webpki-roots = "1"
+# Komponenten (Cloudflare Tunnel, NetBird): Downloads entpacken, Stammzertifikate als PEM für
+# die Go-Programme, Update-Uhrzeit in der Zeitzone des Geräts
+flate2 = "1"
+# QR-Code für die Zwei-Faktor-Anmeldung
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+urlencoding = "2"
+ring = "0.17"
+tar = "0.4"
+webpki-root-certs = "1"
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
+
+# Laufzeit & Hilfen
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "time", "net", "process", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures = { version = "0.3", default-features = false, features = ["std"] }
+regex = "1"
+
+# Sicherheit
+argon2 = "0.5"
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+
+[build-dependencies]
+flate2 = "1"
+
+[dev-dependencies]
+tempfile = "3"
+http = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Argon2 ist ohne Optimierung rund 50-mal langsamer – sonst dauert jede Anmeldung in Tests
+# und mit `cargo run` über eine Sekunde.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

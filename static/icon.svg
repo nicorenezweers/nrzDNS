@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- nrzNetwork: a card with a globe in front of a signpost - names point the way to addresses.
+       Square, no rounded corners: platforms like Umbrel round the icon themselves. -->
+  <rect width="256" height="256" fill="#18181b"/>
+  <!-- signpost behind: pole and two signs pointing right -->
+  <g fill="#52525b">
+    <rect x="170" y="38" width="14" height="168" rx="7"/>
+    <path d="M104 44H190L210 62L190 80H104a8 8 0 0 1-8-8V52a8 8 0 0 1 8-8Z"/>
+    <path d="M142 100H198L218 118L198 136H142a8 8 0 0 1-8-8V108a8 8 0 0 1 8-8Z"/>
+  </g>
+  <!-- card in front -->
+  <rect x="54" y="72" width="108" height="134" rx="18" fill="#e4e4e7" stroke="#18181b" stroke-width="5"/>
+  <!-- globe: outline, meridian and equator -->
+  <g fill="none" stroke="#52525b" stroke-width="9" stroke-linecap="round">
+    <circle cx="108" cy="139" r="33"/>
+    <ellipse cx="108" cy="139" rx="13" ry="33"/>
+    <path d="M75 139H141"/>
+  </g>
+</svg>

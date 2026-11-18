@@ -1,0 +1,14 @@
+# Versteckte Ordner und Dateien im Hauptordner (.git, .github, Werkzeuge, Worktrees) gehören
+# nicht in den Build.
+.*
+target
+ui/target
+ui/dist
+data
+docs
+scripts
+*.db
+*.db-*
+tests
+**/.DS_Store
+dist*

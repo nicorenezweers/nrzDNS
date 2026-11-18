@@ -1,0 +1,22 @@
+[application]
+name = "nrzdns-ui"
+default_platform = "web"
+asset_dir = "assets"
+
+[web.app]
+title = "nrzNetwork"
+
+[web.resource]
+style = []
+script = []
+
+[web.resource.dev]
+style = []
+script = []
+
+# Beim Entwickeln (dx serve) gehen API, Schriften und Übersetzungen an den laufenden Rocket-Server.
+[[web.proxy]]
+backend = "http://localhost:8380/api/"
+
+[[web.proxy]]
+backend = "http://localhost:8380/static/"
