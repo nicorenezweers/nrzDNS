@@ -2,10 +2,11 @@
 //!
 //! Zustandslos: jede `POST`-Anfrage trägt eine JSON-RPC-Nachricht (oder eine Liste davon) und
 //! bekommt die Antwort als `application/json` – ohne Sitzungs-ID und ohne SSE-Strom (`GET`
-//! und `DELETE` → 405). Zugang mit `Authorization: Bearer <Token>` (Einstellungen → MCP oder
-//! `NRZDNS_MCP_TOKEN`). Die Werkzeuge stehen in `services::mcp`.
+//! und `DELETE` → 405). Zugang mit `Authorization: Bearer <Token>`, `X-API-Key: <Token>` oder –
+//! für Clients ohne eigene Kopfzeilen – `/mcp?token=<Token>` (Einstellungen → MCP oder
+//! `NRZDNS_MCP_TOKEN`). CORS ist offen: der Zugang hängt nur am Token, nicht an Cookies.
+//! Die Werkzeuge stehen in `services::mcp`.
 
-use crate::auth::guards::is_cross_origin;
 use crate::config::Config;
 use crate::services::blocking::Updater;
 use crate::services::mcp::{self, Access, Ctx, McpState, ToolError};
@@ -14,30 +15,38 @@ use rocket::data::{Data, ToByteUnit};
 use rocket::http::{ContentType, Header, Status};
 use rocket::request::{FromRequest, Outcome, Request};
 use rocket::response::{self, Responder, Response};
-use rocket::{delete, get, post, routes, Route, State};
+use rocket::{delete, get, options, post, routes, Route, State};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use std::io::Cursor;
 
 pub fn routes() -> Vec<Route> {
-    routes![post_mcp, get_mcp, delete_mcp, post_dieter]
+    routes![
+        post_mcp,
+        get_mcp,
+        delete_mcp,
+        options_mcp,
+        well_known,
+        post_dieter
+    ]
 }
 
 /// Protokollversionen, die dieser Server spricht (neueste zuerst).
-const VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
+const VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 /// Grösster Anfragekörper.
 const MAX_BODY_KIB: u64 = 256;
 
 const INSTRUCTIONS: &str =
-    "nrzNetwork ist ein DNS-Server mit Sperrlisten (Werbe-/Tracking-Filter). \
-    Für eine Übersicht get_overview aufrufen (alle Kennzahlen in einem Aufruf); Details mit \
-    get_statistics, get_server_status, get_blocking_status und get_query_log. Filter schalten \
-    set_blocking (dauerhaft) und pause_blocking (auf Zeit), sofern Änderungen erlaubt sind.";
+    "nrzNetwork ist ein DNS-Server mit Sperrlisten (Werbe-/Tracking-Filter), Reverse Proxy mit \
+    HTTPS, Docker-Übersicht, Cloudflare- und NetBird-Verwaltung. Für eine Übersicht get_overview \
+    aufrufen (alle Kennzahlen in einem Aufruf); Details mit get_statistics, get_server_status, \
+    get_blocking_status, get_query_log, get_proxy, get_docker, get_network_map und dns_lookup. \
+    Alles andere über api_request (Endpunkte: list_api_endpoints). Filter schalten set_blocking \
+    (dauerhaft) und pause_blocking (auf Zeit), sofern das Token Änderungen darf.";
 
 /// Was die Anfrage an Kopfzeilen mitbringt (nie abweisend – die Antwort baut der Handler).
 struct McpHeaders {
     token: Option<String>,
-    cross_origin: bool,
 }
 
 #[rocket::async_trait]
@@ -45,16 +54,25 @@ impl<'r> FromRequest<'r> for McpHeaders {
     type Error = std::convert::Infallible;
 
     async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        let token = req.headers().get_one("Authorization").and_then(|h| {
+        let bearer = req.headers().get_one("Authorization").and_then(|h| {
             let (scheme, token) = h.trim().split_once(' ')?;
             scheme
                 .eq_ignore_ascii_case("bearer")
                 .then(|| token.trim().to_string())
         });
-        Outcome::Success(McpHeaders {
-            token,
-            cross_origin: is_cross_origin(req),
-        })
+        let token = bearer
+            .or_else(|| {
+                req.headers()
+                    .get_one("X-API-Key")
+                    .map(|t| t.trim().to_string())
+            })
+            .or_else(|| {
+                req.query_value::<String>("token")
+                    .and_then(Result::ok)
+                    .map(|t| t.trim().to_string())
+            })
+            .filter(|t| !t.is_empty());
+        Outcome::Success(McpHeaders { token })
     }
 }
 
@@ -88,15 +106,28 @@ impl<'r> Responder<'r, 'static> for Reply {
     fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static> {
         let mut r = Response::build();
         r.status(self.status)
-            .header(Header::new("Cache-Control", "no-store"));
+            .header(Header::new("Cache-Control", "no-store"))
+            .header(Header::new("Access-Control-Allow-Origin", "*"))
+            .header(Header::new(
+                "Access-Control-Expose-Headers",
+                "Mcp-Session-Id, Mcp-Protocol-Version, WWW-Authenticate",
+            ));
         if self.challenge {
             r.header(Header::new(
                 "WWW-Authenticate",
                 "Bearer realm=\"nrzNetwork MCP\"",
             ));
         }
-        if self.status == Status::MethodNotAllowed {
-            r.header(Header::new("Allow", "POST"));
+        if self.status == Status::MethodNotAllowed || self.status == Status::NoContent {
+            r.header(Header::new("Allow", "POST, OPTIONS"));
+        }
+        if self.status == Status::NoContent {
+            r.header(Header::new("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS"))
+                .header(Header::new(
+                    "Access-Control-Allow-Headers",
+                    "Authorization, Content-Type, Accept, X-API-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID",
+                ))
+                .header(Header::new("Access-Control-Max-Age", "86400"));
         }
         if let Some(body) = self.body {
             let text = body.to_string();
@@ -125,16 +156,12 @@ async fn post_mcp(
     engine: &State<Engine>,
     updater: &State<Updater>,
     state: &State<McpState>,
+    dieter: &State<crate::services::dieter::DieterState>,
 ) -> Reply {
-    // Schutz gegen DNS-Rebinding: Browser von fremden Seiten abweisen
-    if headers.cross_origin {
-        return Reply::error(
-            Status::Forbidden,
-            "Anfrage von einer fremden Seite abgewiesen.",
-        );
-    }
-    let allow_changes = match mcp::authorize(pool, config, headers.token.as_deref()).await {
-        Ok(Access::Granted { allow_changes }) => allow_changes,
+    // Kein Schutz über Origin nötig: ohne Token (kein Cookie) geht nichts, auch nicht per
+    // DNS-Rebinding – so funktionieren auch Clients im Browser (z. B. MCP Inspector).
+    let allow_changes = match mcp::authorize(pool, config, state, headers.token.as_deref()).await {
+        Ok(Access::Granted { allow_changes, .. }) => allow_changes,
         Ok(Access::Disabled) => {
             return Reply::error(
                 Status::Unauthorized,
@@ -149,7 +176,6 @@ async fn post_mcp(
             return Reply::error(Status::InternalServerError, "Interner Fehler.");
         }
     };
-    state.touch();
 
     let text = match data.open(MAX_BODY_KIB.kibibytes()).into_string().await {
         Ok(t) if t.is_complete() => t.into_inner(),
@@ -166,6 +192,7 @@ async fn post_mcp(
         config,
         engine,
         updater,
+        dieter,
         allow_changes,
     };
     match message {
@@ -260,6 +287,7 @@ async fn handle(ctx: &Ctx<'_>, m: &Value) -> Option<Value> {
             }
         }
         "resources/list" => rpc_result(id, json!({ "resources": [] })),
+        "resources/templates/list" => rpc_result(id, json!({ "resourceTemplates": [] })),
         "prompts/list" => rpc_result(id, json!({ "prompts": [] })),
         _ => rpc_error(id, -32601, "Method not found"),
     })
@@ -287,6 +315,26 @@ fn get_mcp() -> Reply {
 #[delete("/mcp")]
 fn delete_mcp() -> Reply {
     Reply::error(Status::MethodNotAllowed, "Nur POST.")
+}
+
+/// CORS-Vorabfrage (Browser-Clients).
+#[options("/mcp")]
+fn options_mcp() -> Reply {
+    Reply {
+        status: Status::NoContent,
+        body: None,
+        challenge: false,
+    }
+}
+
+/// Kein OAuth: Clients, die nach `/.well-known/oauth-*` suchen, bekommen ein klares 404 (JSON)
+/// statt der Oberfläche und nehmen dann das Bearer-Token.
+#[get("/.well-known/<_rest..>", rank = 2)]
+fn well_known(_rest: std::path::PathBuf) -> Reply {
+    Reply::error(
+        Status::NotFound,
+        "Nicht vorhanden – Zugang mit Bearer-Token.",
+    )
 }
 
 /// Interner MCP-Zugang für Dieter (Claude CLI): nur von 127.0.0.1 mit dem internen Schlüssel.

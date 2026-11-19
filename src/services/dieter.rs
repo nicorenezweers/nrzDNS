@@ -419,7 +419,7 @@ pub async fn send_with_context(ctx: &Ctx, conv: i64, text: &str, context: &str) 
 // ------------------------------------------------------------------ Anweisungen
 
 /// API-Übersicht aus der Dokumentation der Typen (Tabelle `| Methode Pfad | … |`).
-fn api_reference() -> String {
+pub fn api_reference() -> String {
     include_str!("../../types/src/lib.rs")
         .lines()
         .filter_map(|l| l.strip_prefix("//! | `"))
@@ -585,6 +585,38 @@ fn clip(s: String) -> String {
     format!("{}… (gekürzt, {} Zeichen insgesamt)", &s[..end], s.len())
 }
 
+/// Ruft die eigene REST-API (`/api/v1<path>`) über 127.0.0.1 als Admin auf (auch für den
+/// MCP-Server); `query` ohne `?`, schon kodiert. Ergebnis: HTTP-Status und Antworttext.
+pub async fn internal_request(
+    state: &DieterState,
+    method: &str,
+    path: &str,
+    query: &str,
+    body: Option<&Value>,
+) -> Result<(u16, String), String> {
+    let port = state.0.port.load(Ordering::Relaxed);
+    if port == 0 {
+        return Err("Server startet noch.".into());
+    }
+    let mut url = format!("http://127.0.0.1:{port}/api/v1{path}");
+    if !query.is_empty() {
+        url.push('?');
+        url.push_str(query);
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let m = reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET);
+    let mut req = client.request(m, url).header(INTERNAL_HEADER, state.key());
+    if let Some(b) = body {
+        req = req.json(b);
+    }
+    let r = req.send().await.map_err(|e| e.to_string())?;
+    let status = r.status().as_u16();
+    Ok((status, r.text().await.unwrap_or_default()))
+}
+
 /// Werkzeug ausführen: (Ergebnis für das Modell, Kurzform für die Anzeige).
 pub async fn call_tool(
     ctx: &Ctx,
@@ -612,30 +644,9 @@ pub async fn call_tool(
             if let Err(e) = allowed(&method, &path, allow_changes) {
                 return (format!("Abgelehnt: {e}"), format!("{short} → abgelehnt"));
             }
-            let port = ctx.state.0.port.load(Ordering::Relaxed);
-            let mut url = format!("http://127.0.0.1:{port}/api/v1{path}");
-            if !query.is_empty() {
-                url.push('?');
-                url.push_str(&query);
-            }
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-            {
-                Ok(c) => c,
-                Err(e) => return (e.to_string(), short),
-            };
-            let m = reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET);
-            let mut req = client
-                .request(m, url)
-                .header(INTERNAL_HEADER, ctx.state.key());
-            if let Some(b) = args.get("body").filter(|b| !b.is_null()) {
-                req = req.json(b);
-            }
-            match req.send().await {
-                Ok(r) => {
-                    let status = r.status().as_u16();
-                    let text = r.text().await.unwrap_or_default();
+            let body = args.get("body").filter(|b| !b.is_null());
+            match internal_request(&ctx.state, &method, &path, &query, body).await {
+                Ok((status, text)) => {
                     if method != "GET" && (200..300).contains(&status) {
                         tracing::info!(by = "dieter", %short, status, "Änderung durch Dieter");
                     }

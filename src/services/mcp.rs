@@ -1,29 +1,34 @@
 //! MCP-Server (Model Context Protocol): Zugang per Token und die Werkzeuge.
 //!
 //! Gedacht für nrzDashboard und andere MCP-Clients: Kennzahlen für eine Übersicht
-//! (`get_overview`), Statistiken, Abfrageprotokoll, Zustand – und, wenn der Admin es erlaubt,
-//! Sperren ein-/ausschalten, pausieren, Listen umschalten, Regeln und Cache.
+//! (`get_overview`), Statistiken, Abfrageprotokoll, Zustand, Reverse Proxy, Docker,
+//! Netzwerkkarte, DNS-Abfragen und die ganze REST-API (`api_request`) – und, wenn das Token es
+//! darf, Sperren ein-/ausschalten, pausieren, Listen umschalten, Regeln, Cache und Änderungen
+//! über die API.
 //!
-//! Das Protokoll (JSON-RPC über HTTP) steht in `routes::mcp`; hier nur Fachlogik. Das Token
-//! liegt nur als SHA-256 in der Datenbank (`app_settings`, Schlüssel `mcp`); ein Token aus
-//! `NRZDNS_MCP_TOKEN` hat Vorrang.
+//! Das Protokoll (JSON-RPC über HTTP) steht in `routes::mcp`; hier nur Fachlogik. Es gibt
+//! beliebig viele benannte Tokens, jedes mit eigenem Recht (nur lesen / ändern). Sie liegen nur
+//! als SHA-256 in der Datenbank (`app_settings`, Schlüssel `mcp`); ein Token aus
+//! `NRZDNS_MCP_TOKEN` gilt zusätzlich (id 0).
 
 use crate::auth::session;
 use crate::config::Config;
 use crate::db::now;
 use crate::error::{AppError, AppResult};
 use crate::services::blocking::{self, Updater};
+use crate::services::dieter::{self, DieterState};
 use crate::services::domains::{self, Kind};
 use crate::services::{dashboard, querylog, settings, sync, zones};
 use nrzdns_engine::Engine;
 use nrzdns_types::{
-    BlockListInput, Dashboard, DomainInput, McpStatus, McpToken, QueryLogFilter, StatsRange,
-    TopEntry,
+    BlockListInput, Dashboard, DomainInput, McpStatus, McpToken, McpTokenInfo, McpTokenInput,
+    QueryLogFilter, ResolveInput, StatsRange, TopEntry,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// Schlüssel in `app_settings`.
 const KEY: &str = "mcp";
@@ -33,36 +38,97 @@ pub const PATH: &str = "/mcp";
 const TOKEN_PREFIX: &str = "nrzdns_mcp_";
 /// Einträge je Top-Liste in der Übersicht.
 const OVERVIEW_TOP: usize = 5;
+/// Höchstens so viele Tokens.
+const MAX_TOKENS: usize = 50;
+/// „Zuletzt benutzt“ höchstens so oft (Sekunden) in die Datenbank schreiben.
+const LAST_USED_PERSIST_SECS: i64 = 300;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct StoredToken {
+    id: i64,
+    name: String,
+    hash: String,
+    hint: String,
+    created_at: i64,
+    allow_changes: bool,
+    last_used_at: Option<i64>,
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct Stored {
-    token_hash: Option<String>,
-    token_hint: Option<String>,
-    created_at: Option<i64>,
+    tokens: Vec<StoredToken>,
+    next_id: i64,
+    /// Rechte des Tokens aus `NRZDNS_MCP_TOKEN` (früher: Rechte des einzigen Tokens).
     allow_changes: bool,
+    // Bis 1.13: genau ein Token – wird beim Lesen in `tokens` übernommen.
+    #[serde(skip_serializing)]
+    token_hash: Option<String>,
+    #[serde(skip_serializing)]
+    token_hint: Option<String>,
+    #[serde(skip_serializing)]
+    created_at: Option<i64>,
 }
 
-/// Laufzeit-Zustand (nicht gespeichert): wann `/mcp` zuletzt erfolgreich benutzt wurde.
+impl Stored {
+    fn next_id(&mut self) -> i64 {
+        let max = self.tokens.iter().map(|t| t.id).max().unwrap_or(0);
+        self.next_id = self.next_id.max(max) + 1;
+        self.next_id
+    }
+}
+
+/// Laufzeit-Zustand: wann welches Token zuletzt benutzt wurde, und eine Sperre, damit sich
+/// gleichzeitige Änderungen an den Tokens nicht überschreiben.
 #[derive(Debug, Default)]
 pub struct McpState {
-    last_used: AtomicI64,
+    last_used: Mutex<HashMap<i64, i64>>,
+    write: tokio::sync::Mutex<()>,
 }
 
 impl McpState {
-    pub fn touch(&self) {
-        self.last_used.store(now(), Ordering::Relaxed);
+    fn last_used(&self, id: i64) -> Option<i64> {
+        self.last_used
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .copied()
     }
 
-    fn last_used(&self) -> Option<i64> {
-        Some(self.last_used.load(Ordering::Relaxed)).filter(|t| *t > 0)
+    /// Benutzung merken; `true`, wenn sie in die Datenbank soll.
+    fn touch(&self, id: i64, stored: Option<i64>) -> bool {
+        let t = now();
+        self.last_used
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, t);
+        id != 0 && stored.is_none_or(|s| t - s >= LAST_USED_PERSIST_SECS)
     }
 }
 
 async fn stored(pool: &SqlitePool) -> AppResult<Stored> {
-    Ok(settings::get::<Stored>(pool, KEY)
+    let mut s = settings::get::<Stored>(pool, KEY)
         .await?
-        .unwrap_or_default())
+        .unwrap_or_default();
+    if let Some(hash) = s.token_hash.take() {
+        if !s.tokens.iter().any(|t| t.hash == hash) {
+            let id = s.next_id();
+            s.tokens.push(StoredToken {
+                id,
+                name: "Standard".into(),
+                hash,
+                hint: s
+                    .token_hint
+                    .clone()
+                    .unwrap_or_else(|| format!("{TOKEN_PREFIX}…")),
+                created_at: s.created_at.unwrap_or_else(now),
+                allow_changes: s.allow_changes,
+                last_used_at: None,
+            });
+        }
+    }
+    Ok(s)
 }
 
 /// Erkennbarer Teil des Tokens: bei eigenen Tokens Präfix + 4 + … + 4 Zeichen, sonst 3 + … + 3.
@@ -90,90 +156,155 @@ fn same(a: &str, b: &str) -> bool {
             == 0
 }
 
-pub async fn status(pool: &SqlitePool, config: &Config, state: &McpState) -> AppResult<McpStatus> {
-    let s = stored(pool).await?;
-    let (enabled, from_env, token_hint, created_at) = match config.mcp_env_token() {
-        Some(t) => (true, true, Some(hint(t)), None),
-        None => (
-            s.token_hash.is_some(),
-            false,
-            s.token_hint.clone(),
-            s.created_at,
-        ),
-    };
-    Ok(McpStatus {
-        enabled,
-        from_env,
-        token_hint: token_hint.filter(|_| enabled),
-        created_at: created_at.filter(|_| enabled),
-        allow_changes: s.allow_changes,
-        last_used_at: state.last_used(),
-        path: PATH.into(),
-    })
+fn info(t: &StoredToken, state: &McpState) -> McpTokenInfo {
+    McpTokenInfo {
+        id: t.id,
+        name: t.name.clone(),
+        hint: t.hint.clone(),
+        created_at: Some(t.created_at),
+        allow_changes: t.allow_changes,
+        last_used_at: state.last_used(t.id).max(t.last_used_at),
+        from_env: false,
+    }
 }
 
-/// Neues Token (das alte gilt sofort nicht mehr). Nicht möglich, solange
-/// `NRZDNS_MCP_TOKEN` gesetzt ist.
+fn build_status(s: &Stored, config: &Config, state: &McpState) -> McpStatus {
+    let mut tokens = Vec::new();
+    if let Some(t) = config.mcp_env_token() {
+        tokens.push(McpTokenInfo {
+            id: 0,
+            name: "NRZDNS_MCP_TOKEN".into(),
+            hint: hint(t),
+            created_at: None,
+            allow_changes: s.allow_changes,
+            last_used_at: state.last_used(0),
+            from_env: true,
+        });
+    }
+    tokens.extend(s.tokens.iter().map(|t| info(t, state)));
+    McpStatus {
+        enabled: !tokens.is_empty(),
+        tokens,
+        path: PATH.into(),
+    }
+}
+
+pub async fn status(pool: &SqlitePool, config: &Config, state: &McpState) -> AppResult<McpStatus> {
+    Ok(build_status(&stored(pool).await?, config, state))
+}
+
+fn clean_name(name: &str) -> AppResult<String> {
+    let name = name.trim();
+    if name.chars().count() > 60 {
+        return Err(AppError::bad("Name: höchstens 60 Zeichen."));
+    }
+    Ok(name.to_string())
+}
+
+/// Neues Token mit Namen und Rechten.
 pub async fn create_token(
     pool: &SqlitePool,
     config: &Config,
     state: &McpState,
+    input: &McpTokenInput,
 ) -> AppResult<McpToken> {
-    if config.mcp_env_token().is_some() {
-        return Err(AppError::Conflict(
-            "Das MCP-Token kommt aus NRZDNS_MCP_TOKEN und lässt sich hier nicht ändern.".into(),
-        ));
+    let _guard = state.write.lock().await;
+    let mut s = stored(pool).await?;
+    if s.tokens.len() >= MAX_TOKENS {
+        return Err(AppError::Conflict(format!(
+            "Höchstens {MAX_TOKENS} Tokens – bitte zuerst ein altes löschen."
+        )));
     }
     let token = format!("{TOKEN_PREFIX}{}", session::new_token());
-    let mut s = stored(pool).await?;
-    s.token_hash = Some(session::hash_token(&token));
-    s.token_hint = Some(hint(&token));
-    s.created_at = Some(now());
+    let id = s.next_id();
+    let mut name = clean_name(&input.name)?;
+    if name.is_empty() {
+        name = format!("Token {id}");
+    }
+    let t = StoredToken {
+        id,
+        name,
+        hash: session::hash_token(&token),
+        hint: hint(&token),
+        created_at: now(),
+        allow_changes: input.allow_changes,
+        last_used_at: None,
+    };
+    let info = info(&t, state);
+    s.tokens.push(t);
     settings::set(pool, KEY, &s).await?;
     Ok(McpToken {
         token,
-        status: status(pool, config, state).await?,
+        info,
+        status: build_status(&s, config, state),
     })
 }
 
-/// Token löschen – `/mcp` nimmt danach nichts mehr an.
+/// Name und Rechte eines Tokens ändern.
+pub async fn update_token(
+    pool: &SqlitePool,
+    config: &Config,
+    state: &McpState,
+    id: i64,
+    input: &McpTokenInput,
+) -> AppResult<McpStatus> {
+    let _guard = state.write.lock().await;
+    let mut s = stored(pool).await?;
+    let name = clean_name(&input.name)?;
+    let t = s
+        .tokens
+        .iter_mut()
+        .find(|t| t.id == id)
+        .ok_or_else(|| AppError::NotFound)?;
+    if !name.is_empty() {
+        t.name = name;
+    }
+    t.allow_changes = input.allow_changes;
+    settings::set(pool, KEY, &s).await?;
+    Ok(build_status(&s, config, state))
+}
+
+/// Token löschen – es gilt sofort nicht mehr.
 pub async fn revoke_token(
     pool: &SqlitePool,
     config: &Config,
     state: &McpState,
+    id: i64,
 ) -> AppResult<McpStatus> {
-    if config.mcp_env_token().is_some() {
-        return Err(AppError::Conflict(
-            "Das MCP-Token kommt aus NRZDNS_MCP_TOKEN und lässt sich hier nicht ändern.".into(),
-        ));
-    }
+    let _guard = state.write.lock().await;
     let mut s = stored(pool).await?;
-    s.token_hash = None;
-    s.token_hint = None;
-    s.created_at = None;
+    let before = s.tokens.len();
+    s.tokens.retain(|t| t.id != id);
+    if s.tokens.len() == before {
+        return Err(AppError::NotFound);
+    }
     settings::set(pool, KEY, &s).await?;
-    status(pool, config, state).await
+    Ok(build_status(&s, config, state))
 }
 
+/// Rechte des Tokens aus `NRZDNS_MCP_TOKEN`.
 pub async fn set_allow_changes(
     pool: &SqlitePool,
     config: &Config,
     state: &McpState,
     allow: bool,
 ) -> AppResult<McpStatus> {
+    let _guard = state.write.lock().await;
     let mut s = stored(pool).await?;
     s.allow_changes = allow;
     settings::set(pool, KEY, &s).await?;
-    status(pool, config, state).await
+    Ok(build_status(&s, config, state))
 }
 
 /// Ergebnis der Prüfung eines Tokens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Access {
     /// Kein Token eingerichtet – MCP ist aus.
     Disabled,
     Denied,
     Granted {
+        token_id: i64,
+        name: String,
         allow_changes: bool,
     },
 }
@@ -181,25 +312,51 @@ pub enum Access {
 pub async fn authorize(
     pool: &SqlitePool,
     config: &Config,
+    state: &McpState,
     token: Option<&str>,
 ) -> AppResult<Access> {
     let s = stored(pool).await?;
-    let expected = match config.mcp_env_token() {
-        Some(t) => session::hash_token(t),
-        None => match s.token_hash {
-            Some(h) => h,
-            None => return Ok(Access::Disabled),
-        },
-    };
+    let env = config.mcp_env_token();
+    if env.is_none() && s.tokens.is_empty() {
+        return Ok(Access::Disabled);
+    }
     let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) else {
         return Ok(Access::Denied);
     };
-    Ok(if same(&session::hash_token(token), &expected) {
-        Access::Granted {
-            allow_changes: s.allow_changes,
+    let hash = session::hash_token(token);
+    if let Some(e) = env {
+        if same(&hash, &session::hash_token(e)) {
+            state.touch(0, None);
+            return Ok(Access::Granted {
+                token_id: 0,
+                name: "NRZDNS_MCP_TOKEN".into(),
+                allow_changes: s.allow_changes,
+            });
         }
-    } else {
-        Access::Denied
+    }
+    // Alle vergleichen (keine frühe Antwort, die verrät, welches passt)
+    let found = s.tokens.iter().fold(
+        None,
+        |acc, t| if same(&hash, &t.hash) { Some(t) } else { acc },
+    );
+    let Some(t) = found else {
+        return Ok(Access::Denied);
+    };
+    if state.touch(t.id, t.last_used_at) {
+        // „Zuletzt benutzt“ dauerhaft merken (selten, ohne auf die Sperre zu warten)
+        if let Ok(_guard) = state.write.try_lock() {
+            if let Ok(mut fresh) = stored(pool).await {
+                if let Some(ft) = fresh.tokens.iter_mut().find(|x| x.id == t.id) {
+                    ft.last_used_at = Some(now());
+                    let _ = settings::set(pool, KEY, &fresh).await;
+                }
+            }
+        }
+    }
+    Ok(Access::Granted {
+        token_id: t.id,
+        name: t.name.clone(),
+        allow_changes: t.allow_changes,
     })
 }
 
@@ -211,6 +368,8 @@ pub struct Ctx<'a> {
     pub config: &'a Config,
     pub engine: &'a Engine,
     pub updater: &'a Updater,
+    /// Für Aufrufe der eigenen REST-API (`api_request` und die lesenden Werkzeuge darauf).
+    pub dieter: &'a DieterState,
     pub allow_changes: bool,
 }
 
@@ -367,6 +526,197 @@ const TOOLS: &[Tool] = &[
         },
     },
     Tool {
+        name: "dns_lookup",
+        title: "DNS-Abfrage",
+        description: "DNS-Abfrage wie dig. server leer = nrzNetwork selbst (mit eigenen Zonen, \
+            Sperren und Proxy-Namen); sonst z. B. 1.1.1.1 für die Sicht von aussen.",
+        changes: false,
+        idempotent: true,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "z. B. example.com" },
+                    "type": { "type": "string", "default": "A", "description": "A, AAAA, CNAME, MX, TXT, NS, SOA, CAA, PTR, SRV, HTTPS …" },
+                    "server": { "type": "string", "description": "Leer = nrzNetwork; sonst IP oder Name eines DNS-Servers." }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+            })
+        },
+    },
+    Tool {
+        name: "get_zone",
+        title: "Zone mit Einträgen",
+        description: "Eine eigene Zone mit allen Einträgen (per id oder Name aus list_zones).",
+        changes: false,
+        idempotent: true,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "zone": { "type": "string", "description": "Name (z. B. home.lan) oder id." }
+                },
+                "required": ["zone"],
+                "additionalProperties": false
+            })
+        },
+    },
+    Tool {
+        name: "get_cache",
+        title: "DNS-Cache",
+        description: "Einträge im DNS-Cache (Name, Typ, Antwortcode, Rest-TTL), optional gefiltert.",
+        changes: false,
+        idempotent: true,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "q": { "type": "string", "description": "Teil des Namens." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100 }
+                },
+                "additionalProperties": false
+            })
+        },
+    },
+    Tool {
+        name: "get_proxy",
+        title: "Reverse Proxy",
+        description: "Reverse Proxy: alle Einträge (Domain → Ziel), Ports, HTTPS, Zugriffsschutz, Adresse.",
+        changes: false,
+        idempotent: true,
+        schema: no_args,
+    },
+    Tool {
+        name: "get_tls",
+        title: "HTTPS-Zertifikate",
+        description: "HTTPS (Let's Encrypt): Einstellungen, Zertifikat (Domains, gültig bis), letzter Versuch.",
+        changes: false,
+        idempotent: true,
+        schema: no_args,
+    },
+    Tool {
+        name: "get_docker",
+        title: "Docker",
+        description: "Alle Docker-Container (Name, Zustand, interne IPs, Netze, Ports) und Docker-Netze.",
+        changes: false,
+        idempotent: true,
+        schema: no_args,
+    },
+    Tool {
+        name: "get_docker_logs",
+        title: "Docker-Logs",
+        description: "Letzte Log-Zeilen eines Containers.",
+        changes: false,
+        idempotent: true,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "container": { "type": "string", "description": "Name aus get_docker." },
+                    "tail": { "type": "integer", "minimum": 1, "maximum": 2000, "default": 200 }
+                },
+                "required": ["container"],
+                "additionalProperties": false
+            })
+        },
+    },
+    Tool {
+        name: "get_network_map",
+        title: "Netzwerkkarte",
+        description: "Die ganze Netzwerkkarte: Internet, Zugänge (Cloudflare-Tunnel, Proxy, DNS), \
+            Reverse Proxy, Docker, LAN-Geräte und NetBird mit ihren Verbindungen.",
+        changes: false,
+        idempotent: true,
+        schema: no_args,
+    },
+    Tool {
+        name: "get_devices",
+        title: "Geräte im Netz",
+        description: "Geräte/Clients, die nrzNetwork als DNS benutzen (IP, Name, Anfragen, zuletzt gesehen).",
+        changes: false,
+        idempotent: true,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": { "days": { "type": "integer", "minimum": 1, "maximum": 90, "default": 7 } },
+                "additionalProperties": false
+            })
+        },
+    },
+    Tool {
+        name: "get_access_log",
+        title: "Zugriffe (Reverse Proxy)",
+        description: "Zugriffs-Monitor: letzte Zugriffe auf den Reverse Proxy, optional für einen Host.",
+        changes: false,
+        idempotent: true,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "host": { "type": "string" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100 }
+                },
+                "additionalProperties": false
+            })
+        },
+    },
+    Tool {
+        name: "get_access_stats",
+        title: "Zugriffs-Statistik",
+        description: "Zugriffs-Monitor: Statistik (Zugriffe, Länder, Status, Top-Hosts) für einen Zeitraum.",
+        changes: false,
+        idempotent: true,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "period": { "type": "string", "enum": ["hour", "day", "week", "month"], "default": "day" },
+                    "host": { "type": "string" }
+                },
+                "additionalProperties": false
+            })
+        },
+    },
+    Tool {
+        name: "get_components",
+        title: "Komponenten",
+        description: "Eingebaute Komponenten (Cloudflare Tunnel, NetBird-Client …): installiert, läuft, Version, Fehler.",
+        changes: false,
+        idempotent: true,
+        schema: no_args,
+    },
+    Tool {
+        name: "list_api_endpoints",
+        title: "API-Übersicht",
+        description: "Alle Endpunkte der REST-API von nrzNetwork (für api_request), mit Methode, Pfad und Rechten.",
+        changes: false,
+        idempotent: true,
+        schema: no_args,
+    },
+    Tool {
+        name: "api_request",
+        title: "REST-API aufrufen",
+        description: "Ruft die REST-API von nrzNetwork auf – alles, was die Oberfläche kann (Pfad ohne \
+            /api/v1, siehe list_api_endpoints; z. B. GET /cloudflare/zones, GET /netbird/peers). \
+            Tokens ohne Änderungsrecht dürfen nur GET. Antwort: HTTP-Status und JSON.",
+        changes: false,
+        idempotent: false,
+        schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "method": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"], "default": "GET" },
+                    "path": { "type": "string", "description": "Pfad ohne /api/v1, z. B. /proxy/hosts" },
+                    "query": { "type": "string", "description": "Optional: Query ohne ?, z. B. per_page=500" },
+                    "body": { "description": "Optional: JSON-Körper" }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            })
+        },
+    },
+    Tool {
         name: "set_blocking",
         title: "Sperren ein-/ausschalten",
         description: "Filter (alle Sperren) dauerhaft ein- oder ausschalten. Einschalten beendet \
@@ -476,6 +826,19 @@ const TOOLS: &[Tool] = &[
 
 /// Werkzeuge für `tools/list`; ohne „Änderungen erlauben“ nur die lesenden.
 pub fn tool_list(allow_changes: bool) -> Vec<Value> {
+    // Ohne Änderungsrecht kennt api_request nur GET
+    let read_only_api = || {
+        json!({
+            "type": "object",
+            "properties": {
+                "method": { "type": "string", "enum": ["GET"], "default": "GET" },
+                "path": { "type": "string", "description": "Pfad ohne /api/v1, z. B. /proxy/hosts" },
+                "query": { "type": "string", "description": "Optional: Query ohne ?, z. B. per_page=500" }
+            },
+            "required": ["path"],
+            "additionalProperties": false
+        })
+    };
     TOOLS
         .iter()
         .filter(|t| allow_changes || !t.changes)
@@ -484,13 +847,13 @@ pub fn tool_list(allow_changes: bool) -> Vec<Value> {
                 "name": t.name,
                 "title": t.title,
                 "description": t.description,
-                "inputSchema": (t.schema)(),
+                "inputSchema": if t.name == "api_request" && !allow_changes { read_only_api() } else { (t.schema)() },
                 "annotations": {
                     "title": t.title,
-                    "readOnlyHint": !t.changes,
-                    "destructiveHint": t.changes && t.name == "remove_rule",
+                    "readOnlyHint": !t.changes && (t.name != "api_request" || !allow_changes),
+                    "destructiveHint": t.name == "remove_rule" || t.name == "api_request",
                     "idempotentHint": t.idempotent,
-                    "openWorldHint": false
+                    "openWorldHint": matches!(t.name, "dns_lookup" | "api_request")
                 }
             })
         })
@@ -626,6 +989,94 @@ pub async fn overview(ctx: &Ctx<'_>, range: StatsRange) -> AppResult<Value> {
     }))
 }
 
+/// Pfade, die über MCP nie erreichbar sind (Konten, Anmeldung, MCP selbst, Dieter).
+const BLOCKED_PATHS: &[&str] = &[
+    "/auth",
+    "/users",
+    "/admin",
+    "/dieter",
+    "/settings/mcp",
+    "/account",
+    "/me",
+];
+/// POST-Aufrufe, die nur lesen/prüfen (auch ohne Änderungsrecht erlaubt).
+const READ_POSTS: &[&str] = &[
+    "/tools/ping",
+    "/tools/ports",
+    "/tools/http",
+    "/resolve",
+    "/spy/scan",
+    "/components/check",
+];
+
+fn check_api(method: &str, path: &str, allow_changes: bool) -> Result<(), ToolError> {
+    let fail = |m: String| Err(ToolError::Failed(m));
+    if !path.starts_with('/') || path.contains("..") || path.contains('#') || path.contains('?') {
+        return fail("path muss mit / beginnen (ohne ?, Query in query).".into());
+    }
+    if !matches!(method, "GET" | "POST" | "PUT" | "PATCH" | "DELETE") {
+        return fail("method: GET, POST, PUT, PATCH oder DELETE.".into());
+    }
+    for b in BLOCKED_PATHS {
+        if path == *b || path.starts_with(&format!("{b}/")) {
+            return fail(format!("{b} ist über MCP nicht erreichbar."));
+        }
+    }
+    if method != "GET" && path == "/integrations" {
+        return fail("Zugangsdaten ändern geht nur in der Oberfläche.".into());
+    }
+    if !allow_changes && method != "GET" && !(method == "POST" && READ_POSTS.contains(&path)) {
+        return fail(
+            "Dieses Token darf nur lesen (GET) – Änderungsrecht in nrzNetwork → Einstellungen → MCP."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// Eigene REST-API aufrufen; JSON-Antwort als Wert, Fehler (HTTP ≥ 400) als Werkzeugfehler.
+async fn api(
+    ctx: &Ctx<'_>,
+    method: &str,
+    path: &str,
+    query: &[(&str, String)],
+    body: Option<&Value>,
+) -> ToolResult {
+    let q = query
+        .iter()
+        .filter(|(_, v)| !v.is_empty())
+        .map(|(k, v)| format!("{k}={}", urlencoding::encode(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+    api_raw(ctx, method, path, &q, body).await
+}
+
+async fn api_raw(
+    ctx: &Ctx<'_>,
+    method: &str,
+    path: &str,
+    query: &str,
+    body: Option<&Value>,
+) -> ToolResult {
+    let (status, text) = dieter::internal_request(ctx.dieter, method, path, query, body)
+        .await
+        .map_err(|e| ToolError::Failed(format!("API nicht erreichbar: {e}")))?;
+    let value = if text.trim().is_empty() {
+        json!({ "ok": (200..300).contains(&status), "status": status })
+    } else {
+        serde_json::from_str(&text).unwrap_or(Value::String(text))
+    };
+    if status >= 400 {
+        let msg = value["error"]["message"]
+            .as_str()
+            .or(value["message"].as_str())
+            .or(value.as_str())
+            .unwrap_or("Fehler");
+        return Err(ToolError::Failed(format!("HTTP {status}: {msg}")));
+    }
+    Ok(value)
+}
+
 /// Werkzeug ausführen.
 pub async fn call(ctx: &Ctx<'_>, name: &str, arguments: &Value) -> ToolResult {
     let tool = TOOLS
@@ -732,6 +1183,166 @@ async fn run(ctx: &Ctx<'_>, name: &str, a: &Value) -> ToolResult {
             let a: A = args(a)?;
             let entries = domains::list(pool, kind(&a.list)?).await?;
             Ok(json!({ "list": a.list.trim(), "count": entries.len(), "entries": entries }))
+        }
+        "dns_lookup" => {
+            #[derive(Deserialize, Default)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                name: String,
+                #[serde(rename = "type")]
+                qtype: Option<String>,
+                #[serde(default)]
+                server: String,
+            }
+            let a: A = args(a)?;
+            if a.name.trim().is_empty() {
+                return Err(ToolError::Failed("name fehlt.".into()));
+            }
+            let input = ResolveInput {
+                name: a.name.trim().to_string(),
+                qtype: a.qtype.unwrap_or_else(|| "A".into()).trim().to_uppercase(),
+                server: a.server.trim().to_string(),
+                ..ResolveInput::default()
+            };
+            let r = engine
+                .resolve(&input)
+                .await
+                .map_err(|e| ToolError::Failed(e.to_string()))?;
+            to_value(r)
+        }
+        "get_zone" => {
+            #[derive(Deserialize, Default)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                zone: Value,
+            }
+            let a: A = args(a)?;
+            let wanted = match &a.zone {
+                Value::Number(n) => n.to_string(),
+                Value::String(s) => s.trim().trim_end_matches('.').to_lowercase(),
+                _ => String::new(),
+            };
+            let all = zones::list(pool).await?;
+            let zone = all
+                .iter()
+                .find(|z| z.id.to_string() == wanted || z.name.eq_ignore_ascii_case(&wanted))
+                .ok_or_else(|| {
+                    ToolError::Failed("Zone nicht gefunden (siehe list_zones).".into())
+                })?;
+            api(ctx, "GET", &format!("/zones/{}", zone.id), &[], None).await
+        }
+        "get_cache" => {
+            #[derive(Deserialize, Default)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                #[serde(default)]
+                q: String,
+                limit: Option<u32>,
+            }
+            let a: A = args(a)?;
+            let limit = a.limit.unwrap_or(100).clamp(1, 1000).to_string();
+            api(ctx, "GET", "/cache", &[("q", a.q), ("limit", limit)], None).await
+        }
+        "get_proxy" => api(ctx, "GET", "/proxy", &[], None).await,
+        "get_tls" => api(ctx, "GET", "/tls", &[], None).await,
+        "get_docker" => api(ctx, "GET", "/docker", &[], None).await,
+        "get_network_map" => api(ctx, "GET", "/topology", &[], None).await,
+        "get_components" => api(ctx, "GET", "/components", &[], None).await,
+        "get_docker_logs" => {
+            #[derive(Deserialize, Default)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                container: String,
+                tail: Option<u32>,
+            }
+            let a: A = args(a)?;
+            let name = a.container.trim();
+            if name.is_empty() || name.contains('/') {
+                return Err(ToolError::Failed("container: Name aus get_docker.".into()));
+            }
+            let tail = a.tail.unwrap_or(200).clamp(1, 2000).to_string();
+            let path = format!("/docker/containers/{}/logs", urlencoding::encode(name));
+            api(ctx, "GET", &path, &[("tail", tail)], None).await
+        }
+        "get_devices" => {
+            #[derive(Deserialize, Default)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                days: Option<u32>,
+            }
+            let a: A = args(a)?;
+            let days = a.days.unwrap_or(7).clamp(1, 90).to_string();
+            api(ctx, "GET", "/devices", &[("days", days)], None).await
+        }
+        "get_access_log" => {
+            #[derive(Deserialize, Default)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                #[serde(default)]
+                host: String,
+                limit: Option<u32>,
+            }
+            let a: A = args(a)?;
+            let limit = a.limit.unwrap_or(100).clamp(1, 1000).to_string();
+            api(
+                ctx,
+                "GET",
+                "/access/log",
+                &[("host", a.host), ("limit", limit)],
+                None,
+            )
+            .await
+        }
+        "get_access_stats" => {
+            #[derive(Deserialize, Default)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                #[serde(default)]
+                period: String,
+                #[serde(default)]
+                host: String,
+            }
+            let a: A = args(a)?;
+            api(
+                ctx,
+                "GET",
+                "/access/stats",
+                &[("period", a.period), ("host", a.host)],
+                None,
+            )
+            .await
+        }
+        "list_api_endpoints" => Ok(json!({
+            "basePath": "/api/v1",
+            "note": "Für api_request den Pfad ohne /api/v1 angeben.",
+            "endpoints": dieter::api_reference().lines().collect::<Vec<_>>(),
+        })),
+        "api_request" => {
+            #[derive(Deserialize, Default)]
+            #[serde(deny_unknown_fields)]
+            struct A {
+                method: Option<String>,
+                path: String,
+                #[serde(default)]
+                query: String,
+                body: Option<Value>,
+            }
+            let a: A = args(a)?;
+            let method = a
+                .method
+                .unwrap_or_else(|| "GET".into())
+                .trim()
+                .to_uppercase();
+            let path = a.path.trim().trim_end_matches('/').to_string();
+            let path = path.strip_prefix("/api/v1").unwrap_or(&path).to_string();
+            check_api(&method, &path, ctx.allow_changes)?;
+            let query = a.query.trim().trim_start_matches('?');
+            let body = a.body.as_ref().filter(|b| !b.is_null());
+            let r = api_raw(ctx, &method, &path, query, body).await;
+            if method != "GET" && r.is_ok() {
+                tracing::info!(by = "mcp", %method, %path, "Änderung über MCP (API)");
+            }
+            r
         }
         "set_blocking" => {
             #[derive(Deserialize, Default)]

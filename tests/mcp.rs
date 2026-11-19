@@ -56,7 +56,12 @@ async fn tool(client: &Client, token: &str, name: &str, args: Value) -> (Value, 
 async fn setup() -> (Client, tempfile::TempDir, String) {
     let (client, dir) = common::client().await;
     login_as(&client, "admin", true).await;
-    let (s, v) = post(&client, "/api/v1/settings/mcp/token", json!({})).await;
+    let (s, v) = post(
+        &client,
+        "/api/v1/settings/mcp/tokens",
+        json!({ "name": "Test" }),
+    )
+    .await;
     assert_eq!(s, Status::Ok, "{v}");
     let t: McpToken = serde_json::from_value(v).unwrap();
     (client, dir, t.token)
@@ -70,7 +75,7 @@ async fn token_lifecycle_and_access() {
     let (s, v) = get(&client, "/api/v1/settings/mcp").await;
     assert_eq!(s, Status::Ok);
     let st: McpStatus = serde_json::from_value(v).unwrap();
-    assert!(!st.enabled && !st.allow_changes && st.token_hint.is_none());
+    assert!(!st.enabled && st.tokens.is_empty());
     assert_eq!(st.path, "/mcp");
 
     // Ohne Token ist MCP aus
@@ -78,11 +83,18 @@ async fn token_lifecycle_and_access() {
     let (s, _) = rpc_raw(&client, Some("irgendwas"), ping.clone()).await;
     assert_eq!(s, Status::Unauthorized);
 
-    let (_, v) = post(&client, "/api/v1/settings/mcp/token", json!({})).await;
+    let (_, v) = post(
+        &client,
+        "/api/v1/settings/mcp/tokens",
+        json!({ "name": "Dashboard", "allowChanges": false }),
+    )
+    .await;
     let first: McpToken = serde_json::from_value(v).unwrap();
     assert!(first.token.starts_with("nrzdns_mcp_"));
     assert!(first.status.enabled);
-    let hint = first.status.token_hint.clone().unwrap();
+    assert_eq!(first.info.name, "Dashboard");
+    assert!(!first.info.allow_changes);
+    let hint = first.info.hint.clone();
     assert!(hint.starts_with("nrzdns_mcp_") && hint.contains('…'));
     assert!(!hint.contains(&first.token[11..]));
 
@@ -104,33 +116,140 @@ async fn token_lifecycle_and_access() {
     let (s, _) = rpc_raw(&client, Some("nrzdns_mcp_falsch"), ping.clone()).await;
     assert_eq!(s, Status::Unauthorized);
 
-    // Fremde Seite (Browser) → 403
+    // Token auch als ?token= und X-API-Key; Browser-Clients (Origin) mit CORS
     let res = client
-        .post("/mcp")
-        .header(Header::new(
-            "Authorization",
-            format!("Bearer {}", first.token),
-        ))
-        .header(Header::new("Origin", "https://evil.example"))
+        .post(format!("/mcp?token={}", first.token))
+        .header(ContentType::JSON)
         .body(ping.to_string())
         .dispatch()
         .await;
-    assert_eq!(res.status(), Status::Forbidden);
+    assert_eq!(res.status(), Status::Ok);
+    let res = client
+        .post("/mcp")
+        .header(Header::new("X-API-Key", first.token.clone()))
+        .header(Header::new("Origin", "https://inspector.example"))
+        .body(ping.to_string())
+        .dispatch()
+        .await;
+    assert_eq!(res.status(), Status::Ok);
+    assert_eq!(
+        res.headers().get_one("Access-Control-Allow-Origin"),
+        Some("*")
+    );
+    let res = client.options("/mcp").dispatch().await;
+    assert_eq!(res.status(), Status::NoContent);
+    assert!(res
+        .headers()
+        .get_one("Access-Control-Allow-Headers")
+        .unwrap()
+        .contains("Authorization"));
+    // Keine OAuth-Metadaten (JSON-404 statt der Oberfläche)
+    let res = client
+        .get("/.well-known/oauth-protected-resource/mcp")
+        .dispatch()
+        .await;
+    assert_eq!(res.status(), Status::NotFound);
+    assert_eq!(res.content_type(), Some(ContentType::JSON));
 
-    // Neues Token: das alte gilt nicht mehr
-    let (_, v) = post(&client, "/api/v1/settings/mcp/token", json!({})).await;
+    // Zweites Token mit Änderungsrecht: beide gelten nebeneinander
+    let (_, v) = post(
+        &client,
+        "/api/v1/settings/mcp/tokens",
+        json!({ "name": "Claude", "allowChanges": true }),
+    )
+    .await;
     let second: McpToken = serde_json::from_value(v).unwrap();
     assert_ne!(first.token, second.token);
+    assert_eq!(second.status.tokens.len(), 2);
+    let (s, _) = rpc_raw(&client, Some(&first.token), ping.clone()).await;
+    assert_eq!(s, Status::Ok);
+    let (s, _) = rpc_raw(&client, Some(&second.token), ping.clone()).await;
+    assert_eq!(s, Status::Ok);
+    let (_, v) = get(&client, "/api/v1/settings/mcp").await;
+    let st: McpStatus = serde_json::from_value(v).unwrap();
+    assert!(st.tokens.iter().all(|t| t.last_used_at.is_some()));
+
+    // Rechte je Token
+    let tools = |v: Value| -> Vec<String> {
+        v["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let ro = tools(rpc(&client, &first.token, "tools/list", json!({})).await);
+    let rw = tools(rpc(&client, &second.token, "tools/list", json!({})).await);
+    assert!(!ro.contains(&"set_blocking".to_string()));
+    assert!(rw.contains(&"set_blocking".to_string()));
+    for t in [
+        "get_proxy",
+        "get_docker",
+        "get_network_map",
+        "dns_lookup",
+        "api_request",
+    ] {
+        assert!(ro.contains(&t.to_string()), "{t}");
+    }
+    let (msg, err) = tool(
+        &client,
+        &first.token,
+        "api_request",
+        json!({ "method": "DELETE", "path": "/cache" }),
+    )
+    .await;
+    assert!(err && msg.as_str().unwrap().contains("nur lesen"), "{msg}");
+    let (msg, err) = tool(
+        &client,
+        &second.token,
+        "api_request",
+        json!({ "path": "/settings/mcp" }),
+    )
+    .await;
+    assert!(
+        err && msg.as_str().unwrap().contains("nicht erreichbar"),
+        "{msg}"
+    );
+    let (eps, err) = tool(&client, &first.token, "list_api_endpoints", json!({})).await;
+    assert!(!err && eps["endpoints"].as_array().unwrap().len() > 40);
+
+    // Umbenennen und Recht entziehen
+    let (s, v) = put(
+        &client,
+        &format!("/api/v1/settings/mcp/tokens/{}", second.info.id),
+        json!({ "name": "Claude Code", "allowChanges": false }),
+    )
+    .await;
+    assert_eq!(s, Status::Ok, "{v}");
+    let st: McpStatus = serde_json::from_value(v).unwrap();
+    let t = st.tokens.iter().find(|t| t.id == second.info.id).unwrap();
+    assert_eq!((t.name.as_str(), t.allow_changes), ("Claude Code", false));
+    let rw = tools(rpc(&client, &second.token, "tools/list", json!({})).await);
+    assert!(!rw.contains(&"set_blocking".to_string()));
+
+    // Löschen → nur dieses Token gilt nicht mehr
+    let (s, v) = delete(
+        &client,
+        &format!("/api/v1/settings/mcp/tokens/{}", first.info.id),
+    )
+    .await;
+    assert_eq!(s, Status::Ok);
+    assert_eq!(v["enabled"], true);
     let (s, _) = rpc_raw(&client, Some(&first.token), ping.clone()).await;
     assert_eq!(s, Status::Unauthorized);
     let (s, _) = rpc_raw(&client, Some(&second.token), ping.clone()).await;
     assert_eq!(s, Status::Ok);
-    let (_, v) = get(&client, "/api/v1/settings/mcp").await;
-    assert!(v["lastUsedAt"].as_i64().is_some());
-
-    // Löschen → aus
-    let (s, v) = delete(&client, "/api/v1/settings/mcp/token").await;
-    assert_eq!(s, Status::Ok);
+    let (s, _) = delete(
+        &client,
+        &format!("/api/v1/settings/mcp/tokens/{}", first.info.id),
+    )
+    .await;
+    assert_eq!(s, Status::NotFound);
+    let (_, v) = delete(
+        &client,
+        &format!("/api/v1/settings/mcp/tokens/{}", second.info.id),
+    )
+    .await;
     assert_eq!(v["enabled"], false);
     let (s, _) = rpc_raw(&client, Some(&second.token), ping).await;
     assert_eq!(s, Status::Unauthorized);
@@ -146,7 +265,7 @@ async fn token_lifecycle_and_access() {
     login_as(&client, "bob", false).await;
     for (s, _) in [
         get(&client, "/api/v1/settings/mcp").await,
-        post(&client, "/api/v1/settings/mcp/token", json!({})).await,
+        post(&client, "/api/v1/settings/mcp/tokens", json!({})).await,
         put(
             &client,
             "/api/v1/settings/mcp",
@@ -159,21 +278,41 @@ async fn token_lifecycle_and_access() {
 }
 
 #[rocket::async_test]
-async fn env_token_wins() {
+async fn env_token_and_legacy_token() {
     let (client, _dir) =
         common::client_with(|f| f.merge(("mcp_token", "ein-sehr-geheimes-token"))).await;
     login_as(&client, "admin", true).await;
     let (_, v) = get(&client, "/api/v1/settings/mcp").await;
-    assert_eq!(
-        (v["enabled"].clone(), v["fromEnv"].clone()),
-        (json!(true), json!(true))
-    );
-    assert_eq!(v["tokenHint"], "ein…ken");
-    let (s, _) = post(&client, "/api/v1/settings/mcp/token", json!({})).await;
-    assert_eq!(s, Status::Conflict);
+    assert_eq!(v["enabled"], true);
+    assert_eq!(v["tokens"][0]["fromEnv"], true);
+    assert_eq!(v["tokens"][0]["hint"], "ein…ken");
     let ping = json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" });
-    let (s, _) = rpc_raw(&client, Some("ein-sehr-geheimes-token"), ping).await;
+    let (s, _) = rpc_raw(&client, Some("ein-sehr-geheimes-token"), ping.clone()).await;
     assert_eq!(s, Status::Ok);
+    // Eigene Tokens gehen zusätzlich
+    let (s, v) = post(&client, "/api/v1/settings/mcp/tokens", json!({})).await;
+    assert_eq!(s, Status::Ok);
+    let t: McpToken = serde_json::from_value(v).unwrap();
+    assert_eq!(t.status.tokens.len(), 2);
+    let (s, _) = rpc_raw(&client, Some(&t.token), ping.clone()).await;
+    assert_eq!(s, Status::Ok);
+
+    // Ein Token aus 1.13 (genau eins, ohne Liste) gilt weiter
+    let legacy = "nrzdns_mcp_altesTokenAusVersion113xxxxxxxx";
+    let value = json!({
+        "tokenHash": nrzdns::auth::session::hash_token(legacy),
+        "tokenHint": "nrzdns_mcp_alte…xxxx",
+        "createdAt": 1,
+        "allowChanges": true
+    });
+    nrzdns::services::settings::set(pool(&client), "mcp", &value)
+        .await
+        .unwrap();
+    let (s, _) = rpc_raw(&client, Some(legacy), ping).await;
+    assert_eq!(s, Status::Ok);
+    let (_, v) = get(&client, "/api/v1/settings/mcp").await;
+    assert_eq!(v["tokens"][1]["name"], "Standard");
+    assert_eq!(v["tokens"][1]["allowChanges"], true);
 
     let dir = tempfile::tempdir().unwrap();
     let short = nrzdns::build_with(common::figment(&dir).merge(("mcp_token", "kurz"))).await;
@@ -205,7 +344,7 @@ async fn protocol_and_overview() {
         json!({ "protocolVersion": "1999-01-01" }),
     )
     .await;
-    assert_eq!(v["result"]["protocolVersion"], "2025-06-18");
+    assert_eq!(v["result"]["protocolVersion"], "2025-11-25");
 
     // Benachrichtigung → 202 ohne Körper
     let (s, v) = rpc_raw(
@@ -345,15 +484,17 @@ async fn protocol_and_overview() {
 
 #[rocket::async_test]
 async fn filters_can_be_switched_when_allowed() {
-    let (client, _dir, token) = setup().await;
-    let (s, v) = put(
+    let (client, _dir) = common::client().await;
+    login_as(&client, "admin", true).await;
+    let (s, v) = post(
         &client,
-        "/api/v1/settings/mcp",
-        json!({ "allowChanges": true }),
+        "/api/v1/settings/mcp/tokens",
+        json!({ "name": "Schalter", "allowChanges": true }),
     )
     .await;
     assert_eq!(s, Status::Ok);
-    assert_eq!(v["allowChanges"], true);
+    assert_eq!(v["info"]["allowChanges"], true);
+    let token = v["token"].as_str().unwrap().to_string();
 
     let v = rpc(&client, &token, "tools/list", json!({})).await;
     let tools = v["result"]["tools"].as_array().unwrap();

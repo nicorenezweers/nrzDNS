@@ -63,9 +63,10 @@
 //! | `DELETE /cache/<name>` | → [`CacheFlushResult`] (alle Typen dieses Namens) | Admin |
 //! | `POST /resolve` | [`ResolveInput`] → [`ResolveResult`] (DNS-Client) | angemeldet |
 //! | `GET /settings/mcp` | → [`McpStatus`] | Admin |
-//! | `PUT /settings/mcp` | [`McpSettingsInput`] → [`McpStatus`] | Admin |
-//! | `POST /settings/mcp/token` | → [`McpToken`] (neues Token, nur jetzt im Klartext; das alte gilt nicht mehr) | Admin |
-//! | `DELETE /settings/mcp/token` | → [`McpStatus`] (MCP aus) | Admin |
+//! | `PUT /settings/mcp` | [`McpSettingsInput`] → [`McpStatus`] (Rechte des Tokens aus `NRZDNS_MCP_TOKEN`) | Admin |
+//! | `POST /settings/mcp/tokens` | [`McpTokenInput`] → [`McpToken`] (neues Token, nur jetzt im Klartext) | Admin |
+//! | `PUT /settings/mcp/tokens/<id>` | [`McpTokenInput`] → [`McpStatus`] (Name, Rechte) | Admin |
+//! | `DELETE /settings/mcp/tokens/<id>` | → [`McpStatus`] (Token gilt sofort nicht mehr) | Admin |
 //! | `GET /proxy` | → [`ProxyStatus`] (Reverse Proxy: Einträge, Ports, Adresse) | angemeldet |
 //! | `PUT /proxy/settings` | [`ProxySettings`] → [`ProxyStatus`] | Admin |
 //! | `POST /proxy/hosts` | [`ProxyHostInput`] → [`ProxyHost`] | Admin |
@@ -136,17 +137,17 @@ use serde::{Deserialize, Serialize};
 mod access;
 mod dieter;
 mod docker;
-mod topology;
 mod spy;
 mod tls;
 mod tools;
+mod topology;
 pub use access::*;
 pub use dieter::*;
 pub use docker::*;
-pub use topology::*;
 pub use spy::*;
 pub use tls::*;
 pub use tools::*;
+pub use topology::*;
 
 // ------------------------------------------------------------------ Fehler
 
@@ -1305,21 +1306,41 @@ pub struct ServerStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct McpStatus {
-    /// Es gibt ein Token (aus der Datenbank oder `NRZDNS_MCP_TOKEN`), `/mcp` nimmt Anfragen an.
+    /// Es gibt mindestens ein Token, `/mcp` nimmt Anfragen an.
     pub enabled: bool,
-    /// Das Token kommt aus der Umgebung (`NRZDNS_MCP_TOKEN`) und lässt sich hier nicht ändern.
-    pub from_env: bool,
-    /// Anfang und Ende des Tokens (`nrzdns_mcp_Ab3d…x9Z1`).
-    pub token_hint: Option<String>,
-    pub created_at: Option<i64>,
-    /// Werkzeuge, die etwas ändern (Sperren, Pause, Listen, Regeln, Cache), sind erlaubt.
-    pub allow_changes: bool,
-    /// Zuletzt benutzt (Unix-Sekunden, seit dem Start des Servers).
-    pub last_used_at: Option<i64>,
+    /// Alle Tokens; das aus `NRZDNS_MCP_TOKEN` (falls gesetzt) zuerst, mit `fromEnv`.
+    pub tokens: Vec<McpTokenInfo>,
     /// `/mcp`
     pub path: String,
 }
 
+/// Ein MCP-Token (ohne das Geheimnis).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct McpTokenInfo {
+    /// 0 = Token aus `NRZDNS_MCP_TOKEN`.
+    pub id: i64,
+    pub name: String,
+    /// Anfang und Ende des Tokens (`nrzdns_mcp_Ab3d…x9Z1`).
+    pub hint: String,
+    pub created_at: Option<i64>,
+    /// Werkzeuge, die etwas ändern (Sperren, Regeln, Cache, API mit POST/PUT/DELETE), sind erlaubt.
+    pub allow_changes: bool,
+    /// Zuletzt benutzt (Unix-Sekunden).
+    pub last_used_at: Option<i64>,
+    /// Kommt aus der Umgebung (`NRZDNS_MCP_TOKEN`), lässt sich nicht löschen.
+    pub from_env: bool,
+}
+
+/// Neues Token oder Name/Rechte eines Tokens ändern.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct McpTokenInput {
+    pub name: String,
+    pub allow_changes: bool,
+}
+
+/// Rechte des Tokens aus `NRZDNS_MCP_TOKEN`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct McpSettingsInput {
@@ -1331,6 +1352,7 @@ pub struct McpSettingsInput {
 #[serde(rename_all = "camelCase")]
 pub struct McpToken {
     pub token: String,
+    pub info: McpTokenInfo,
     pub status: McpStatus,
 }
 

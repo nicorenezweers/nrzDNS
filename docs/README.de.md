@@ -25,7 +25,7 @@ nrzNetwork beantwortet die DNS-Anfragen deines ganzen Netzes mit einem kleinen P
 | **Abfrageprotokoll** | Jede Anfrage mit Client, Protokoll, Name, Typ, Antwortcode, Herkunft der Antwort (Zone, Cache, Weiterleitung, gesperrt, lokal, verworfen, fehlgeschlagen), Antwort, Dauer und vorgelagertem Server. **Filter** nach Client, Name, Typ, Antwortcode, Herkunft und Zeitraum, **CSV-Export**, Aufbewahrung in Tagen. |
 | **Dashboard** | Kennzahlen, **Verlaufsdiagramm** über die letzte Stunde, den letzten Tag, die letzte Woche oder den letzten Monat, **Top-Clients, Top-Domains, meistgesperrte Domains** und Anfragetypen, Serverzustand mit Laufzeit, Anfragen je Sekunde, Cache-Grösse und Zustand der Weiterleitungen. |
 | **DNS-Client** | Diesen Server (mit Zonen, Sperren und Cache) oder jeden anderen über UDP, TCP, DoT oder DoH fragen, für jeden Eintragstyp – mit Flags, Antwort-, Authority- und Additional-Abschnitt. |
-| **MCP-Server** | **Model Context Protocol** unter `/mcp` für [nrzDashboard](#mcp-server-nrzdashboard) und andere MCP-Clients: alle Kennzahlen für eine Übersicht in einem Aufruf, Statistiken, Abfrageprotokoll, Zustand von Server und Sperren – und, wenn der Admin es erlaubt, Filter ein-/ausschalten, pausieren, Sperrlisten umschalten, Regeln anlegen, Cache leeren. |
+| **MCP-Server** | **Model Context Protocol** unter `/mcp` für [nrzDashboard](#mcp-server-nrzdashboard), Claude und andere MCP-Clients, mit beliebig vielen benannten Tokens (jedes nur lesend oder mit Änderungen): alle Kennzahlen für eine Übersicht in einem Aufruf, Statistiken, Abfrageprotokoll, DNS-Abfragen, Reverse Proxy, Docker, Netzwerkkarte, Zertifikate und die ganze REST-API – und, wenn das Token darf, Filter ein-/ausschalten, pausieren, Sperrlisten umschalten, Regeln anlegen, Cache leeren. |
 | **Reverse Proxy** | Namen statt IP und Port: `music.nrz.ch` → `http://100.78.107.162:8350`, `bench.nrz.ch` → `http://100.78.107.162:8550`. nrzNetwork beantwortet den Namen selbst mit der Adresse des Proxys, der eingebaute HTTP-Proxy reicht nach dem `Host`-Header weiter – mit Streaming, WebSockets und umgeschriebenen Weiterleitungen. Die Domain muss dir nicht gehören; es klappt auf allen Geräten, die nrzNetwork benutzen. Nur HTTP. |
 | **DNS-Einträge (Cloudflare)** | Alle Zonen deines Cloudflare-Kontos und **alle DNS-Einträge** an einem Ort: A, AAAA, CNAME, TXT, MX, NS, SRV, CAA – anlegen, ändern, löschen, suchen, Cloudflare-Proxy (orange Wolke) ein/aus, TTL und Kommentare. |
 | **NetBird** | Dein ganzes NetBird-Netzwerk über die NetBird-API (Cloud oder selbst gehostet): **Geräte** (umbenennen, Gruppen, SSH, Ablauf der Anmeldung, entfernen), **Gruppen**, **Zugriffsregeln** (wer wen erreicht, Protokolle, Ports), **Netzwerke** (Ressourcen und Router), **DNS** (Nameserver, dazu ein Klick: *nrzNetwork als DNS für alle NetBird-Geräte*), **Setup-Keys** (mit fertigem `netbird up`-Befehl) und **Benutzer** (einladen, Rolle, sperren). Die Geräte-Seite zeigt NetBird-Namen automatisch. |
@@ -54,7 +54,7 @@ Du brauchst Docker. Das Image enthält Programm und Oberfläche.
 docker run -d --name nrzdns \
   -p 53:53/udp -p 53:53/tcp -p 8380:8380 \
   -v nrzdns-data:/data \
-  ghcr.io/nicorenezweers/nrz-dns:1.13.1
+  ghcr.io/nicorenezweers/nrz-dns:1.14.0
 ```
 
 Das Image ist für mehrere Architekturen gebaut (`linux/amd64`, `linux/arm64`) und erscheint mit jedem [Release](https://github.com/nicorenezweers/nrzDNS/releases). Selbst bauen (Docker mit buildx und `cargo`, das nur das Dockerfile erzeugt – übersetzt wird alles in Docker):
@@ -74,7 +74,7 @@ cargo xtask docker -t nrzdns
 ```yaml
 services:
   nrzdns:
-    image: ghcr.io/nicorenezweers/nrz-dns:1.13.1   # oder: build: .
+    image: ghcr.io/nicorenezweers/nrz-dns:1.14.0   # oder: build: .
     container_name: nrzdns
     restart: unless-stopped
     ports:
@@ -108,10 +108,10 @@ Der Container läuft als Benutzer `1000` ohne zusätzliche Rechte. Docker (ab 20
 Jedes [Release](https://github.com/nicorenezweers/nrzDNS/releases) enthält das Programm für Linux (`amd64`, `arm64`) als einzelne Datei, dazu `SHA256SUMS`. Die Wurzelzertifikate für DoT, DoH und das Laden der Sperrlisten bringt es selbst mit.
 
 ```bash
-curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.13.1/nrzdns-1.13.1-linux-amd64
-chmod +x nrzdns-1.13.1-linux-amd64
-sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.13.1-linux-amd64   # Port 53 ohne root
-NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.13.1-linux-amd64
+curl -LO https://github.com/nicorenezweers/nrzDNS/releases/download/v1.14.0/nrzdns-1.14.0-linux-amd64
+chmod +x nrzdns-1.14.0-linux-amd64
+sudo setcap 'cap_net_bind_service=+ep' nrzdns-1.14.0-linux-amd64   # Port 53 ohne root
+NRZDNS_ADDRESS=0.0.0.0 NRZDNS_PORT=8380 NRZDNS_DATA_DIR=./data ./nrzdns-1.14.0-linux-amd64
 ```
 
 Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen lassen, z. B. `NRZDNS_DNS_LISTEN=127.0.0.1:5353`, und mit `dig @127.0.0.1 -p 5353 example.com` fragen.
@@ -119,7 +119,7 @@ Zum Ausprobieren, ohne Port 53 anzufassen, auf einer anderen Adresse lauschen la
 ### Beide Architekturen
 
 ```bash
-cargo xtask docker --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.13.1 --push
+cargo xtask docker --platform linux/amd64,linux/arm64 -t <registry>/nrz-dns:1.14.0 --push
 ```
 
 Rust wird quer-kompiliert, nicht emuliert – der arm64-Build ist auf einem x86-Rechner also schnell und umgekehrt. Nur das Programm, gzip-komprimiert je Architektur (für die Umbrel-App): `cargo xtask store-binaries <ordner>`. Das Dockerfile als Datei (z. B. für `docker compose build`): `cargo xtask dockerfile > Dockerfile`.
@@ -158,7 +158,7 @@ Einstellungen für den Start kommen aus Umgebungsvariablen mit dem Präfix `NRZD
 | `NRZDNS_CONFIG` | `Rocket.toml` (`/app/Rocket.toml` im Image) | Pfad der Konfigurationsdatei |
 | `NRZDNS_COOKIE_SECURE` | `false` | Auf `true` setzen, wenn die Oberfläche über HTTPS läuft |
 | `NRZDNS_IP_HEADER` | `X-Real-IP` | Kopfzeile, in der ein Reverse Proxy die Adresse des Aufrufers mitschickt (Bremse gegen Passwort-Raten); `false`, wenn nrzNetwork direkt erreichbar ist |
-| `NRZDNS_MCP_TOKEN` | – | Festes Token für den MCP-Server (mindestens 16 Zeichen); sonst unter *Einstellungen → MCP* erzeugen |
+| `NRZDNS_MCP_TOKEN` | – | Zusätzliches festes Token für den MCP-Server (mindestens 16 Zeichen); Tokens sonst unter *Einstellungen → MCP* erzeugen |
 | `NRZDNS_LOG` | `info` | Log-Filter, z. B. `debug` oder `info,nrzdns_engine=debug` |
 
 ### DNS-Einstellungen (Oberfläche, Admins)
@@ -184,9 +184,14 @@ Die Domain muss dir nicht gehören – die Namen gibt es nur für Geräte, die n
 
 nrzNetwork spricht das [Model Context Protocol](https://modelcontextprotocol.io) unter `POST /mcp` (Streamable HTTP, JSON-RPC 2.0, zustandslos, Antworten als `application/json`). Darüber holt sich nrzDashboard die Werte für seine Übersicht – jeder andere MCP-Client geht genauso.
 
-1. *Einstellungen → MCP* (Admins): **Token erzeugen** und kopieren (es wird nur einmal angezeigt). Oder `NRZDNS_MCP_TOKEN` setzen.
-2. Im Client: URL `http://<host>:8380/mcp`, Kopfzeile `Authorization: Bearer <Token>`.
-3. Optional: **Änderungen über MCP erlauben** – sonst kann das Token nur lesen.
+1. *Einstellungen → MCP* (Admins): Namen vergeben (z. B. `Claude Code`), **Darf ändern** wählen oder nicht, **Token erzeugen** und kopieren (es wird nur einmal angezeigt, mit fertiger `claude mcp add …`-Zeile und JSON-Konfiguration). Beliebig viele Tokens – eins je Client –, einzeln umbenennen, Rechte ändern oder löschen. `NRZDNS_MCP_TOKEN` gilt zusätzlich.
+2. Im Client: URL `http://<host>:8380/mcp`, Kopfzeile `Authorization: Bearer <Token>` (oder `X-API-Key: <Token>`; Clients ohne eigene Kopfzeilen nehmen `http://<host>:8380/mcp?token=<Token>`).
+
+```bash
+claude mcp add --transport http nrznetwork http://<host>:8380/mcp --header "Authorization: Bearer <Token>"
+```
+
+CORS ist offen (der Zugang hängt nur am Token, nie an Cookies) – auch Clients im Browser wie der MCP Inspector gehen; `/.well-known/oauth-*` antwortet 404, damit Clients nicht auf OAuth warten.
 
 | Werkzeug | Liefert / macht |
 |---|---|
@@ -202,8 +207,18 @@ nrzNetwork spricht das [Model Context Protocol](https://modelcontextprotocol.io)
 | `update_blocklists` ✎ | Alle aktiven Listen jetzt neu laden |
 | `add_rule` / `remove_rule` `{list, domain, comment?}` ✎ | Eigene Sperren (`blocked`) oder Ausnahmen (`allowed`) |
 | `flush_cache` `{name?}` ✎ | Cache leeren, ganz oder für einen Namen |
+| `dns_lookup` `{name, type?, server?}` | DNS-Abfrage wie dig – leerer `server` = nrzNetwork selbst, sonst z. B. `1.1.1.1` |
+| `get_zone` `{zone}` | Eine Zone (Name oder id) mit allen Einträgen |
+| `get_cache` `{q?, limit?}` | Einträge im Cache |
+| `get_proxy`, `get_tls` | Reverse-Proxy-Einträge, Ports, Zugriffsschutz; HTTPS-Zertifikat |
+| `get_docker`, `get_docker_logs` `{container, tail?}` | Container mit internen IPs, Netzen, Ports; Logs eines Containers |
+| `get_network_map` | Die ganze Netzwerkkarte (Internet, Tunnel, Proxy, Docker, LAN, NetBird) |
+| `get_devices` `{days?}`, `get_access_log` `{host?, limit?}`, `get_access_stats` `{period?, host?}` | Clients; Zugriffs-Monitor des Reverse Proxy |
+| `get_components` | Eingebauter Cloudflare Tunnel und NetBird-Client |
+| `list_api_endpoints` | Alle REST-Endpunkte (für `api_request`) |
+| `api_request` `{method?, path, query?, body?}` | Beliebiger REST-Aufruf (Pfad ohne `/api/v1`, z. B. `GET /cloudflare/zones`); lesende Tokens nur `GET` |
 
-✎ = nur mit *Änderungen über MCP erlauben*; ohne fehlen diese Werkzeuge schon in der Liste. `range` ist `hour`, `day` (Vorgabe), `week` oder `month`. Jedes Ergebnis kommt als JSON-Text und als `structuredContent`.
+✎ = nur für Tokens, die ändern dürfen; bei den anderen fehlen diese Werkzeuge schon in der Liste. `range` ist `hour`, `day` (Vorgabe), `week` oder `month`. Jedes Ergebnis kommt als JSON-Text und als `structuredContent`.
 
 ```bash
 curl -s http://localhost:8380/mcp -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
